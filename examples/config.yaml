@@ -1,0 +1,13 @@
+services:
+  example-service:
+    authenticated: false
+    target: http://n-gate.com
+    routes:
+      - prefix: /service-a
+        rewrite: /
+  example-service-2:
+    authenticated: true
+    target: http://my.host.svc.local
+    routes:
+      - prefix: /service-b
+        rewrite: /
