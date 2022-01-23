@@ -5,9 +5,17 @@ services:
     routes:
       - prefix: /service-a
         rewrite: /
+      - prefix: /service-a/healthz
+        private: true
+      - prefix: /service-a/metrics
+        private: true
   example-service-2:
-    authenticated: true
-    target: http://my.host.svc.local
+    authenticated: false
+    target: https://immunkarte.de/v2
     routes:
       - prefix: /service-b
         rewrite: /
+      - prefix: /service-b/healthz
+        private: true
+      - prefix: /service-b/metrics
+        private: true

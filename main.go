@@ -58,7 +58,7 @@ type (
 		Target        string   `yaml:"target"`
 		TargetURL     *url.URL `yaml:"-"`
 		Rewrite       string   `yaml:"rewrite"`
-		Deny          bool     `yaml:"deny"`
+		Private       bool     `yaml:"private"`
 		Authenticated bool     `yaml:"authenticated"`
 	}
 
@@ -93,10 +93,10 @@ const (
 	AccountRolesHeader  = "X-Account-Roles"
 	AuthorizationHeader = "Authorization"
 	// Timeouts
-	ShutdownTimeout = 30 * time.Second
 	ReadTimeout     = 5 * time.Second
 	WriteTimeout    = 10 * time.Second
 	IdleTimeout     = 15 * time.Second
+	ShutdownTimeout = 30 * time.Second
 )
 
 var (
@@ -199,19 +199,28 @@ func ParseConfig(configData string) ([]Route, error) {
 
 	var routes = make([]Route, 0, len(c.Services))
 
-	for i, s := range c.Services {
+	for _, s := range c.Services {
+		s := s
+
 		u, err := url.Parse(s.Target)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse service target host (%s): %w", s.Target, err)
 		}
 
-		for j, r := range s.Routes {
+		for _, r := range s.Routes {
+			r := r
+
 			var (
-				target      string
-				targetURL   *url.URL
-				prefix      = filepath.Clean(r.Prefix)
-				prefixSlash = r.Prefix + "/"
+				target       string
+				targetURL    *url.URL
+				prefix       = filepath.Clean(r.Prefix)
+				prefixSlash  = prefix
+				autneticated = s.Authenticated
 			)
+
+			if !strings.HasSuffix(prefixSlash, "/") {
+				prefixSlash += "/"
+			}
 
 			if r.Target != "" {
 				ur, err := url.Parse(r.Target)
@@ -226,13 +235,19 @@ func ParseConfig(configData string) ([]Route, error) {
 				targetURL = u
 			}
 
-			c.Services[i].Routes[j].Prefix = prefix
-			c.Services[i].Routes[j].PrefixSlash = prefixSlash
-			c.Services[i].Routes[j].Target = target
-			c.Services[i].Routes[j].TargetURL = targetURL
-			c.Services[i].Routes[j].Authenticated = s.Authenticated
+			if r.Authenticated {
+				autneticated = r.Authenticated
+			}
 
-			routes = append(routes, c.Services[i].Routes[j])
+			routes = append(routes, Route{
+				Prefix:        prefix,
+				PrefixSlash:   prefixSlash,
+				Target:        target,
+				TargetURL:     targetURL,
+				Rewrite:       r.Rewrite,
+				Private:       r.Private,
+				Authenticated: autneticated,
+			})
 		}
 	}
 
@@ -290,7 +305,7 @@ func NewHandler(routes []Route, keystore *Keystore, proxy *httputil.ReverseProxy
 			}
 		}
 
-		if route == nil || route.Deny {
+		if route == nil || route.Private {
 			http.NotFound(w, r)
 			return
 		}
