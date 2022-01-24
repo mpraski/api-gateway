@@ -9,7 +9,7 @@ services:
       - prefix: /service-a/metrics
         private: true
   example-service-2:
-    authentication: jwt
+    authenticated: true
     target: https://immunkarte.de/v2
     routes:
       - prefix: /service-b
@@ -18,10 +18,3 @@ services:
         private: true
       - prefix: /service-b/metrics
         private: true
-authentication:
-  jwt:
-    publicKey: |-
-      -----BEGIN PUBLIC KEY-----
-      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOr6rMmRRNKuZuwws/hWwFTM6ECEE
-      aJGGARCJUO4UfoURl8b4JThGt8VDFKeR2i+ZxE+xh/wTBaJ/zvtSqZiNnQ==
-      -----END PUBLIC KEY-----
