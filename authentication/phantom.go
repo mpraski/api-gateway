@@ -16,10 +16,7 @@ type PhantomAuthenticator struct {
 	valueParser     token.Parser
 }
 
-const (
-	tokenLength         = 2
-	authorizationHeader = "Authorization"
-)
+const tokenLength = 2
 
 var ErrTokenMissing = errors.New("failed to extract phantom token from header")
 
@@ -56,7 +53,10 @@ func (a *PhantomAuthenticator) Authenticate(r *http.Request) error {
 		return fmt.Errorf("failed to parse value token: %w", err)
 	}
 
-	r.Header.Set(authorizationHeader, "Bearer "+j.String())
+	_ = j
+
+	r.Header.Set(origAuthorizationHeader, "Bearer "+t)
+	r.Header.Set(authorizationHeader, "Bearer "+h)
 
 	return nil
 }

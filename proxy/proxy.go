@@ -58,6 +58,8 @@ func (p *Proxy) Handler() http.Handler {
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
 			}
+		} else {
+			authentication.ClearHeaders(r)
 		}
 
 		r = r.WithContext(context.WithValue(r.Context(), routeKey, route))

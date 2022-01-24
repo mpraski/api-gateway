@@ -14,38 +14,39 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 	"github.com/mpraski/api-gateway/proxy"
-	"github.com/mpraski/api-gateway/server"
+	"github.com/mpraski/api-gateway/service"
 	"github.com/mpraski/api-gateway/token"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-type input struct {
-	Proxy struct {
-		Address string `default:":8080"`
-		Config  string `required:"true"`
-	}
-	Server struct {
+type (
+	timeouts struct {
 		ReadTimeout     time.Duration `default:"5s"`
 		WriteTimeout    time.Duration `default:"10s"`
 		IdleTimeout     time.Duration `default:"15s"`
 		ShutdownTimeout time.Duration `default:"30s"`
 	}
-	Internal struct {
-		Address         string        `default:":8081"`
-		ReadTimeout     time.Duration `default:"5s"`
-		WriteTimeout    time.Duration `default:"10s"`
-		IdleTimeout     time.Duration `default:"15s"`
-		ShutdownTimeout time.Duration `default:"30s"`
+
+	input struct {
+		Proxy struct {
+			Config string `required:"true"`
+		}
+		Server struct {
+			timeouts
+			Address string `default:":8080"`
+		}
+		Internal struct {
+			timeouts
+			Address string `default:":8081"`
+		}
+		Observability struct {
+			timeouts
+			Address string `default:":9090"`
+		}
 	}
-	Observability struct {
-		Address         string        `default:":9090"`
-		ReadTimeout     time.Duration `default:"5s"`
-		WriteTimeout    time.Duration `default:"10s"`
-		IdleTimeout     time.Duration `default:"15s"`
-		ShutdownTimeout time.Duration `default:"30s"`
-	}
-}
+)
 
 var (
 	// Health check
@@ -84,7 +85,7 @@ func main() {
 
 	deps.Add(depsSize)
 
-	internal := server.NewInternal(server.Config(i.Internal))
+	internal := newInternalServer(&i)
 
 	go func() {
 		logger.Println("starting internal server at", i.Internal.Address)
@@ -95,7 +96,7 @@ func main() {
 		}
 	}()
 
-	observability := server.NewObservability(server.Config(i.Observability), healthz())
+	observability := newObservabilityServer(&i)
 
 	go func() {
 		logger.Println("starting observability server at", i.Observability.Address)
@@ -116,7 +117,7 @@ func main() {
 	h = proxy.WithLogging(logger)(h)
 
 	main := &http.Server{
-		Addr:         i.Proxy.Address,
+		Addr:         i.Server.Address,
 		ReadTimeout:  i.Server.ReadTimeout,
 		WriteTimeout: i.Server.WriteTimeout,
 		IdleTimeout:  i.Server.IdleTimeout,
@@ -154,11 +155,11 @@ func main() {
 
 	deps.Wait()
 
-	logger.Println("server is ready to handle requests at", i.Proxy.Address)
+	logger.Println("server is ready to handle requests at", i.Server.Address)
 	atomic.StoreInt32(&healthy, 1)
 
 	if err := main.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Fatalf("failed to listen on %s: %v\n", i.Proxy.Address, err)
+		logger.Fatalf("failed to listen on %s: %v\n", i.Server.Address, err)
 	}
 
 	<-done
@@ -173,6 +174,34 @@ func healthz() http.Handler {
 		}
 		w.WriteHeader(http.StatusServiceUnavailable)
 	})
+}
+
+func newInternalServer(cfg *input) *http.Server {
+	router := http.NewServeMux()
+
+	router.Handle("/internal/tokens", http.HandlerFunc(service.NewTokenReferenceServer(nil).HandleAssociation))
+
+	return &http.Server{
+		Addr:         cfg.Internal.Address,
+		ReadTimeout:  cfg.Internal.ReadTimeout,
+		WriteTimeout: cfg.Internal.WriteTimeout,
+		IdleTimeout:  cfg.Internal.IdleTimeout,
+		Handler:      router,
+	}
+}
+
+func newObservabilityServer(cfg *input) *http.Server {
+	router := http.NewServeMux()
+	router.Handle("/healthz", healthz())
+	router.Handle("/metrics", promhttp.Handler())
+
+	return &http.Server{
+		Addr:         cfg.Observability.Address,
+		ReadTimeout:  cfg.Observability.ReadTimeout,
+		WriteTimeout: cfg.Observability.WriteTimeout,
+		IdleTimeout:  cfg.Observability.IdleTimeout,
+		Handler:      router,
+	}
 }
 
 // nolint:deadcode,unused // Only for local testing

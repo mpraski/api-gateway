@@ -18,3 +18,20 @@ services:
         private: true
       - prefix: /service-b/metrics
         private: true
+
+authentication:
+  tokens:
+    reference:
+      publicKey:
+        source: gsm
+        name: gsm-reference-token-public-key
+      privateKey:
+        source: gsm
+        name: gsm-reference-token-private-key
+    value:
+      publicKey:
+        source: gsm
+        name: gsm-value-token-public-key
+      privateKey:
+        source: gsm
+        name: gsm-value-token-private-key
