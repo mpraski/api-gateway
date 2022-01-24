@@ -2,30 +2,44 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
 	"github.com/mpraski/api-gateway/proxy"
+	"github.com/mpraski/api-gateway/server"
 	"github.com/mpraski/api-gateway/token"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type input struct {
 	Proxy struct {
-		Port   int    `default:"8080"`
-		Config string `required:"true"`
+		Address string `default:":8080"`
+		Config  string `required:"true"`
 	}
 	Server struct {
+		ReadTimeout     time.Duration `default:"5s"`
+		WriteTimeout    time.Duration `default:"10s"`
+		IdleTimeout     time.Duration `default:"15s"`
+		ShutdownTimeout time.Duration `default:"30s"`
+	}
+	Internal struct {
+		Address         string        `default:":8081"`
+		ReadTimeout     time.Duration `default:"5s"`
+		WriteTimeout    time.Duration `default:"10s"`
+		IdleTimeout     time.Duration `default:"15s"`
+		ShutdownTimeout time.Duration `default:"30s"`
+	}
+	Observability struct {
+		Address         string        `default:":9090"`
 		ReadTimeout     time.Duration `default:"5s"`
 		WriteTimeout    time.Duration `default:"10s"`
 		IdleTimeout     time.Duration `default:"15s"`
@@ -49,6 +63,8 @@ var (
 	})
 )
 
+const depsSize = 2
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
@@ -61,10 +77,34 @@ func main() {
 	}
 
 	var (
-		done       = make(chan bool)
-		quit       = make(chan os.Signal, 1)
-		listenAddr = fmt.Sprintf(":%d", i.Proxy.Port)
+		deps sync.WaitGroup
+		done = make(chan bool)
+		quit = make(chan os.Signal, 1)
 	)
+
+	deps.Add(depsSize)
+
+	internal := server.NewInternal(server.Config(i.Internal))
+
+	go func() {
+		logger.Println("starting internal server at", i.Internal.Address)
+		deps.Done()
+
+		if err := internal.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("failed to start internal server on %s: %v\n", i.Internal.Address, err)
+		}
+	}()
+
+	observability := server.NewObservability(server.Config(i.Observability), healthz())
+
+	go func() {
+		logger.Println("starting observability server at", i.Observability.Address)
+		deps.Done()
+
+		if err := observability.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("failed to start observability server on %s: %v\n", i.Observability.Address, err)
+		}
+	}()
 
 	p, err := proxy.New(strings.NewReader(i.Proxy.Config), nil)
 	if err != nil {
@@ -75,17 +115,12 @@ func main() {
 	h = proxy.WithMetrics(requestsRoutedTotal, requestsRoutedDuration)(h)
 	h = proxy.WithLogging(logger)(h)
 
-	router := http.NewServeMux()
-	router.Handle("/healthz", healthz())
-	router.Handle("/metrics", promhttp.Handler())
-	router.Handle("/", h)
-
-	server := &http.Server{
-		Addr:         listenAddr,
+	main := &http.Server{
+		Addr:         i.Proxy.Address,
 		ReadTimeout:  i.Server.ReadTimeout,
 		WriteTimeout: i.Server.WriteTimeout,
 		IdleTimeout:  i.Server.IdleTimeout,
-		Handler:      router,
+		Handler:      h,
 	}
 
 	signal.Notify(quit, os.Interrupt)
@@ -98,20 +133,32 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), i.Server.ShutdownTimeout)
 		defer cancel()
 
-		server.SetKeepAlivesEnabled(false)
+		main.SetKeepAlivesEnabled(false)
+		internal.SetKeepAlivesEnabled(false)
+		observability.SetKeepAlivesEnabled(false)
 
-		if err := server.Shutdown(ctx); err != nil {
+		if err := main.Shutdown(ctx); err != nil {
 			logger.Fatalf("failed to gracefully shutdown the server: %v\n", err)
+		}
+
+		if err := internal.Shutdown(ctx); err != nil {
+			logger.Fatalf("failed to gracefully shutdown internal server: %v\n", err)
+		}
+
+		if err := observability.Shutdown(ctx); err != nil {
+			logger.Fatalf("failed to gracefully shutdown observability server: %v\n", err)
 		}
 
 		close(done)
 	}()
 
-	logger.Println("server is ready to handle requests at", listenAddr)
+	deps.Wait()
+
+	logger.Println("server is ready to handle requests at", i.Proxy.Address)
 	atomic.StoreInt32(&healthy, 1)
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Fatalf("failed to listen on %s: %v\n", listenAddr, err)
+	if err := main.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Fatalf("failed to listen on %s: %v\n", i.Proxy.Address, err)
 	}
 
 	<-done
