@@ -33,33 +33,38 @@ import (
 type (
 	// Input represents the required program configuration.
 	Input struct {
-		Port      int    `default:"8080"`
-		PublicKey string `required:"true" split_words:"true"`
-		Config    string `required:"true"`
+		Port   int    `default:"8080"`
+		Config string `required:"true"`
 	}
 
 	// Config represents the required proxy configuration.
 	Config struct {
-		Services map[string]Service `yaml:"services,flow"`
+		Routes         []Route
+		Authentication map[string]Authentication
 	}
 
 	// Service represents a collection of routes.
 	Service struct {
-		Target        string   `yaml:"target"`
-		TargetURL     *url.URL `yaml:"-"`
-		Authenticated bool     `yaml:"authenticated"`
-		Routes        []Route  `yaml:"routes,flow"`
+		Target         string   `yaml:"target"`
+		TargetURL      *url.URL `yaml:"-"`
+		Routes         []Route  `yaml:"routes,flow"`
+		Authentication string   `yaml:"authentication"`
 	}
 
 	// Route is the basic unit of routing.
 	Route struct {
-		Prefix        string   `yaml:"prefix"`
-		PrefixSlash   string   `yaml:"-"`
-		Target        string   `yaml:"target"`
-		TargetURL     *url.URL `yaml:"-"`
-		Rewrite       string   `yaml:"rewrite"`
-		Private       bool     `yaml:"private"`
-		Authenticated bool     `yaml:"authenticated"`
+		Prefix         string   `yaml:"prefix"`
+		PrefixSlash    string   `yaml:"-"`
+		Target         string   `yaml:"target"`
+		TargetURL      *url.URL `yaml:"-"`
+		Rewrite        string   `yaml:"rewrite"`
+		Private        bool     `yaml:"private"`
+		Authentication string   `yaml:"authentication"`
+	}
+
+	Authentication struct {
+		PublicKey        string `yaml:"publicKey"`
+		PublicKeyDecoded *ecdsa.PublicKey
 	}
 
 	// Claims that are stored in the JWT.
@@ -67,12 +72,6 @@ type (
 		jwt.StandardClaims
 		AccountID uuid.UUID `json:"-"`
 		Roles     []string  `json:"roles"`
-	}
-
-	// Keystore holds the public key required for JWT verification.
-	Keystore struct {
-		PublicKeyBytes []byte
-		PublicKey      *ecdsa.PublicKey
 	}
 
 	// LoggingWriter persists the response status code.
@@ -97,6 +96,8 @@ const (
 	WriteTimeout    = 10 * time.Second
 	IdleTimeout     = 15 * time.Second
 	ShutdownTimeout = 30 * time.Second
+	// Authentication
+	JWT = "jwt"
 )
 
 var (
@@ -110,13 +111,18 @@ var (
 		AuthorizationHeader,
 	}
 	// Errors
-	ErrTokenMissing = errors.New("token is missing from the header")
 	ErrTokenInvalid = errors.New("token is invalid")
+	ErrTokenMissing = errors.New("token is missing from the header")
 	// Metrics
-	RequestsRouted = promauto.NewCounterVec(prometheus.CounterOpts{
+	RequestsRoutedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "api_gateway_requests_routed_total",
 		Help: "The total number of routed requests",
 	}, []string{"method", "path", "code"})
+	RequestsRoutedDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "api_gateway_requests_routed_duration_seconds",
+		Help:    "The histogram of routed request duration in seconds",
+		Buckets: prometheus.DefBuckets,
+	})
 )
 
 func main() {
@@ -128,14 +134,9 @@ func main() {
 		logger.Fatalf("Failed to load input: %v\n", err)
 	}
 
-	routes, err := ParseConfig(input.Config)
+	config, err := ParseConfig(input.Config)
 	if err != nil {
 		logger.Fatalf("Failed to load config: %v\n", err)
-	}
-
-	keystore, err := NewKeystore(input.PublicKey)
-	if err != nil {
-		logger.Fatalf("Failed to initialize keystore: %v\n", err)
 	}
 
 	var (
@@ -148,8 +149,8 @@ func main() {
 	router.Handle("/healthz", Healthz())
 	router.Handle("/metrics", promhttp.Handler())
 	router.Handle("/", WithLogging(logger)(
-		WithMetrics(RequestsRouted)(
-			NewHandler(routes, keystore, NewReverseProxy()),
+		WithMetrics(RequestsRoutedTotal, RequestsRoutedDuration)(
+			NewHandler(config, NewReverseProxy()),
 		),
 	))
 
@@ -191,8 +192,12 @@ func main() {
 	logger.Println("Server stopped")
 }
 
-func ParseConfig(configData string) ([]Route, error) {
-	var c Config
+func ParseConfig(configData string) (*Config, error) {
+	var c struct {
+		Services       map[string]Service        `yaml:"services,flow"`
+		Authentication map[string]Authentication `yaml:"authentication,flow"`
+	}
+
 	if err := yaml.NewDecoder(strings.NewReader(configData)).Decode(&c); err != nil {
 		return nil, fmt.Errorf("failed to decode config data: %w", err)
 	}
@@ -211,11 +216,11 @@ func ParseConfig(configData string) ([]Route, error) {
 			r := r
 
 			var (
-				target       string
-				targetURL    *url.URL
-				prefix       = filepath.Clean(r.Prefix)
-				prefixSlash  = prefix
-				autneticated = s.Authenticated
+				target        string
+				targetURL     *url.URL
+				prefix        = filepath.Clean(r.Prefix)
+				prefixSlash   = prefix
+				autnetication = s.Authentication
 			)
 
 			if !strings.HasSuffix(prefixSlash, "/") {
@@ -235,18 +240,18 @@ func ParseConfig(configData string) ([]Route, error) {
 				targetURL = u
 			}
 
-			if r.Authenticated {
-				autneticated = r.Authenticated
+			if r.Authentication != "" {
+				autnetication = r.Authentication
 			}
 
 			routes = append(routes, Route{
-				Prefix:        prefix,
-				PrefixSlash:   prefixSlash,
-				Target:        target,
-				TargetURL:     targetURL,
-				Rewrite:       r.Rewrite,
-				Private:       r.Private,
-				Authenticated: autneticated,
+				Prefix:         prefix,
+				PrefixSlash:    prefixSlash,
+				Target:         target,
+				TargetURL:      targetURL,
+				Rewrite:        r.Rewrite,
+				Private:        r.Private,
+				Authentication: autnetication,
 			})
 		}
 	}
@@ -255,7 +260,26 @@ func ParseConfig(configData string) ([]Route, error) {
 		return len(routes[i].Prefix) > len(routes[j].Prefix)
 	})
 
-	return routes, nil
+	var authentication = make(map[string]Authentication)
+
+	for name, auth := range c.Authentication {
+		if name == JWT {
+			k, err := DecodePublicKey(auth.PublicKey)
+			if err != nil {
+				return nil, err
+			}
+
+			authentication[JWT] = Authentication{
+				PublicKey:        auth.PublicKey,
+				PublicKeyDecoded: k,
+			}
+		}
+	}
+
+	return &Config{
+		Routes:         routes,
+		Authentication: authentication,
+	}, nil
 }
 
 func (c *Claims) Parse() error {
@@ -277,7 +301,7 @@ func (r *Route) Matches(urlPath string) bool {
 	return r.Prefix == urlPath || strings.HasPrefix(urlPath, r.PrefixSlash)
 }
 
-func NewKeystore(publicKey string) (*Keystore, error) {
+func DecodePublicKey(publicKey string) (*ecdsa.PublicKey, error) {
 	blockPub, _ := pem.Decode([]byte(publicKey))
 	if blockPub == nil {
 		return nil, errors.New("public certificate is invalid")
@@ -288,19 +312,16 @@ func NewKeystore(publicKey string) (*Keystore, error) {
 		return nil, fmt.Errorf("failed to parse public key: %w", err)
 	}
 
-	return &Keystore{
-		PublicKey:      genericPublicKey.(*ecdsa.PublicKey),
-		PublicKeyBytes: []byte(publicKey),
-	}, nil
+	return genericPublicKey.(*ecdsa.PublicKey), nil
 }
 
-func NewHandler(routes []Route, keystore *Keystore, proxy *httputil.ReverseProxy) http.Handler {
+func NewHandler(config *Config, proxy *httputil.ReverseProxy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var route *Route
 
-		for i := range routes {
-			if routes[i].Matches(r.URL.Path) {
-				route = &routes[i]
+		for i := range config.Routes {
+			if config.Routes[i].Matches(r.URL.Path) {
+				route = &config.Routes[i]
 				break
 			}
 		}
@@ -310,8 +331,9 @@ func NewHandler(routes []Route, keystore *Keystore, proxy *httputil.ReverseProxy
 			return
 		}
 
-		if route.Authenticated {
-			token, err := ParseToken(r, keystore)
+		switch route.Authentication {
+		case JWT:
+			token, err := ParseToken(r, config.Authentication[JWT].PublicKeyDecoded)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
@@ -333,16 +355,14 @@ func NewHandler(routes []Route, keystore *Keystore, proxy *httputil.ReverseProxy
 			for _, role := range claims.Roles {
 				r.Header.Add(AccountRolesHeader, role)
 			}
-		} else {
+		default:
 			for _, h := range senstiveHeaders {
 				r.Header.Del(h)
 			}
 		}
 
 		r = r.WithContext(context.WithValue(r.Context(), RouteKey, route))
-
 		r.Header.Set("X-Forwarded-Host", r.Header.Get("Host"))
-
 		proxy.ServeHTTP(w, r)
 	})
 }
@@ -358,7 +378,7 @@ func ExtractToken(r *http.Request) (found bool, token string) {
 	return
 }
 
-func ParseToken(r *http.Request, k *Keystore) (*jwt.Token, error) {
+func ParseToken(r *http.Request, key *ecdsa.PublicKey) (*jwt.Token, error) {
 	ok, tokenStr := ExtractToken(r)
 	if !ok {
 		return nil, ErrTokenMissing
@@ -369,7 +389,7 @@ func ParseToken(r *http.Request, k *Keystore) (*jwt.Token, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 
-		return k.PublicKey, nil
+		return key, nil
 	})
 }
 
@@ -447,11 +467,16 @@ func Healthz() http.Handler {
 
 const decimalBase = 10
 
-func WithMetrics(counter *prometheus.CounterVec) func(http.Handler) http.Handler {
+func WithMetrics(
+	counter *prometheus.CounterVec,
+	histogram prometheus.Histogram,
+) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w = NewLoggingWriter(w)
+			timer := prometheus.NewTimer(histogram)
 			defer func() {
+				timer.ObserveDuration()
 				counter.WithLabelValues(
 					r.Method,
 					r.URL.Path,
