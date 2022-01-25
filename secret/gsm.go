@@ -32,4 +32,4 @@ func (m *GoogleSecretManager) Get(ctx context.Context, name string) (Secret, err
 	return r.Payload.Data, nil
 }
 
-func (m *GoogleSecretManager) Close() { m.client.Close() }
+func (m *GoogleSecretManager) Close() { _ = m.client.Close() }

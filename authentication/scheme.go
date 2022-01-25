@@ -1,14 +1,22 @@
 package authentication
 
-import "net/http"
+import (
+	"net/http"
+)
 
-type Scheme interface {
-	Authenticate(*http.Request) error
-}
+type (
+	Scheme interface {
+		Authenticate(*http.Request) error
+	}
+
+	SchemeType int
+)
 
 const (
 	authorizationHeader     = "Authorization"
 	origAuthorizationHeader = "X-Orig-Authorization"
+	// Type
+	Phantom SchemeType = iota
 )
 
 var sensitiveHeaders = []string{

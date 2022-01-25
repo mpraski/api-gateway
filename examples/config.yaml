@@ -1,6 +1,7 @@
 services:
   example-service:
     target: http://n-gate.com
+    authenticated: true
     routes:
       - prefix: /service-a
         rewrite: /
@@ -19,19 +20,11 @@ services:
       - prefix: /service-b/metrics
         private: true
 
-authentication:
-  tokens:
-    reference:
-      publicKey:
-        source: gsm
-        name: gsm-reference-token-public-key
-      privateKey:
-        source: gsm
-        name: gsm-reference-token-private-key
-    value:
-      publicKey:
-        source: gsm
-        name: gsm-value-token-public-key
-      privateKey:
-        source: gsm
-        name: gsm-value-token-private-key
+secrets:
+  source: file
+  reference:
+    publicKey: examples/key.pem
+    privateKey: examples/pkey.pem
+  value:
+    publicKey: examples/key.pem
+    privateKey: examples/pkey.pem

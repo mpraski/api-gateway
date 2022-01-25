@@ -18,7 +18,7 @@ type PhantomAuthenticator struct {
 
 const tokenLength = 2
 
-var ErrTokenMissing = errors.New("failed to extract phantom token from header")
+var ErrTokenMissing = errors.New("failed to extract reference token from header")
 
 func NewPhantomAuthenticator(
 	getter store.Getter,

@@ -75,9 +75,9 @@ func newReverseProxy() *httputil.ReverseProxy {
 		var (
 			route        = req.Context().Value(routeKey).(*route)
 			routePath    = req.URL.Path
-			targetScheme = route.TargetURL.Scheme
-			targetHost   = route.TargetURL.Host
-			targetQuery  = route.TargetURL.RawQuery
+			targetScheme = route.Target.Scheme
+			targetHost   = route.Target.Host
+			targetQuery  = route.Target.RawQuery
 		)
 
 		if targetScheme == "" {

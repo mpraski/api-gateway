@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -13,8 +14,10 @@ import (
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
+	"github.com/mpraski/api-gateway/authentication"
 	"github.com/mpraski/api-gateway/proxy"
 	"github.com/mpraski/api-gateway/service"
+	"github.com/mpraski/api-gateway/store"
 	"github.com/mpraski/api-gateway/token"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -67,6 +70,8 @@ var (
 const depsSize = 2
 
 func main() {
+	rootCtx := context.Background()
+
 	rand.Seed(time.Now().UnixNano())
 
 	logger := log.New(os.Stdout, "http: ", log.LstdFlags)
@@ -75,6 +80,21 @@ func main() {
 	var i input
 	if err := envconfig.Process(app, &i); err != nil {
 		logger.Fatalf("failed to load input: %v\n", err)
+	}
+
+	var (
+		proxyConfig = strings.NewReader(i.Proxy.Config)
+		storeGetter = store.NewMemoryStore()
+	)
+
+	factory, err := authentication.NewFactory(proxyConfig, storeGetter)
+	if err != nil {
+		logger.Fatalf("failed to initialize authentication scheme factory: %v\n", err)
+	}
+
+	scheme, err := factory.New(rootCtx, authentication.Phantom)
+	if err != nil {
+		logger.Fatalf("failed to initialize phantom authentication scheme: %v\n", err)
 	}
 
 	var (
@@ -91,8 +111,8 @@ func main() {
 		logger.Println("starting internal server at", i.Internal.Address)
 		deps.Done()
 
-		if err := internal.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatalf("failed to start internal server on %s: %v\n", i.Internal.Address, err)
+		if errs := internal.ListenAndServe(); errs != nil && errs != http.ErrServerClosed {
+			logger.Fatalf("failed to start internal server on %s: %v\n", i.Internal.Address, errs)
 		}
 	}()
 
@@ -102,12 +122,14 @@ func main() {
 		logger.Println("starting observability server at", i.Observability.Address)
 		deps.Done()
 
-		if err := observability.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatalf("failed to start observability server on %s: %v\n", i.Observability.Address, err)
+		if errs := observability.ListenAndServe(); errs != nil && errs != http.ErrServerClosed {
+			logger.Fatalf("failed to start observability server on %s: %v\n", i.Observability.Address, errs)
 		}
 	}()
 
-	p, err := proxy.New(strings.NewReader(i.Proxy.Config), nil)
+	_, _ = proxyConfig.Seek(0, io.SeekStart)
+
+	p, err := proxy.New(proxyConfig, scheme)
 	if err != nil {
 		logger.Fatalf("failed to initialize proxy: %v\n", err)
 	}

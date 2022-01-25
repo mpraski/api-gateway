@@ -13,20 +13,24 @@ import (
 
 type (
 	service struct {
-		Target        string   `yaml:"target"`
-		TargetURL     *url.URL `yaml:"-"`
-		Routes        []route  `yaml:"routes,flow"`
-		Authenticated bool     `yaml:"authenticated"`
+		Target        string        `yaml:"target"`
+		Routes        []routeConfig `yaml:"routes,flow"`
+		Authenticated bool          `yaml:"authenticated"`
+	}
+
+	routeConfig struct {
+		Prefix  string `yaml:"prefix"`
+		Rewrite string `yaml:"rewrite"`
+		Private bool   `yaml:"private"`
 	}
 
 	route struct {
-		Prefix        string   `yaml:"prefix"`
-		PrefixSlash   string   `yaml:"-"`
-		Target        string   `yaml:"target"`
-		TargetURL     *url.URL `yaml:"-"`
-		Rewrite       string   `yaml:"rewrite"`
-		Private       bool     `yaml:"private"`
-		Authenticated bool     `yaml:"authenticated"`
+		Target        *url.URL
+		Prefix        string
+		PrefixSlash   string
+		Rewrite       string
+		Private       bool
+		Authenticated bool
 	}
 )
 
@@ -57,8 +61,6 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 			r := r
 
 			var (
-				target      string
-				targetURL   *url.URL
 				prefix      = filepath.Clean(r.Prefix)
 				prefixSlash = prefix
 			)
@@ -67,27 +69,13 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 				prefixSlash += "/"
 			}
 
-			if r.Target != "" {
-				ur, err := url.Parse(r.Target)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse route target host (%s): %w", r.Target, err)
-				}
-
-				target = r.Target
-				targetURL = ur
-			} else {
-				target = s.Target
-				targetURL = u
-			}
-
 			routes = append(routes, route{
 				Prefix:        prefix,
 				PrefixSlash:   prefixSlash,
-				Target:        target,
-				TargetURL:     targetURL,
+				Target:        u,
 				Rewrite:       r.Rewrite,
 				Private:       r.Private,
-				Authenticated: r.Authenticated,
+				Authenticated: s.Authenticated,
 			})
 		}
 	}
