@@ -24,7 +24,7 @@ func (s *BackoffStore) Get(ctx context.Context, name string) (Secret, error) {
 	for i := 0; i < s.tries; i++ {
 		time.Sleep(s.backoff)
 
-		if secret, err = s.getter.Get(ctx, name); err != nil {
+		if secret, err = s.getter.Get(ctx, name); err == nil {
 			return secret, nil
 		}
 	}
