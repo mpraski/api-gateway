@@ -1,0 +1,42 @@
+{{- range $name, $service := .Values.services }}
+{{- if $service.enabled }}
+{{- with $service }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "project.fullname" $ }}-{{ $name }}
+  labels:
+    app: {{ template "project.fullname" $ }}-{{ $name }}
+    {{ include "project.labels" $ | nindent 4 }}
+    {{- if .labels }}
+    {{ toYaml .labels | nindent 4 }}
+    {{- end }}
+  {{- if .annotations}}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+spec:
+  type: {{ .type | default "ClusterIP"}}
+  ports:
+    {{- if .http.enabled }}
+    - port: {{ .http.port | default 80 }}
+      targetPort: {{ .http.targetPort | default "http" }}
+      protocol: TCP
+      name: http
+    {{- end }}
+    {{- if .internal.enabled }}
+    - port: {{ .internal.port | default 80 }}
+      targetPort: {{ .internal.targetPort | default "internal" }}
+      protocol: TCP
+      name: grpc
+    {{- end }}
+  selector:
+    app: {{ template "project.fullname" $ }}-{{ $name }}
+    tier: app
+    release: {{ $.Release.Name }}
+{{- end }}
+{{- end }}
+{{- end }}

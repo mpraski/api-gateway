@@ -33,6 +33,10 @@ type (
 
 	input struct {
 		Config string `required:"true"`
+		Redis  struct {
+			Host string `default:"localhost"`
+			Port int    `default:"1234"`
+		}
 		Server struct {
 			timeouts
 			Address string `default:":8080"`

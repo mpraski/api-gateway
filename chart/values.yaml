@@ -1,0 +1,104 @@
+serviceAccount:
+  create: true
+  name: project
+  annotations:
+    iam.gke.io/gcp-service-account: "project@project.iam.gserviceaccount.com"
+
+rbac:
+  create: true
+
+deployments:
+  gateway:
+    enabled: true
+    replicaCount: 1
+    containers:
+      app:
+        image:
+          repository: gcr.io/project/project
+          tag: latest
+        http:
+          enabled: true
+        internal:
+          enabled: true
+        probe:
+          enabled: true
+        livenessProbe:
+          enabled: true
+        readinessProbe:
+          enabled: true
+        configMap: app
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 1
+
+services:
+  public:
+    enabled: true
+    type: ClusterIP
+    http:
+      enabled: true
+    internal:
+      enabled: false
+    backend:
+      enabled: true
+    frontend:
+      enabled: true
+    annotations:
+      cloud.google.com/neg: '{"ingress": true}'
+  internal:
+    enabled: true
+    type: ClusterIP
+    http:
+      enabled: false
+    internal:
+      enabled: true
+    backend:
+      enabled: false
+    frontend:
+      enabled: false
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
+  matchLabels:
+    app: api-gateway-public
+
+prometheusRules:
+  enabled: false
+  labels:
+    role: alert-rules
+    release: kube-prometheus-stack
+    prometheus: kube-prometheus-stack-prometheus
+  groups: []
+
+grafana:
+  enabled: true
+
+ingress:
+  enabled: true
+
+networkPolicies:
+  internal:
+    enabled: true
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels:
+                team: auth-internal
+      - ports:
+          - port: 8081
+  monitoring:
+    enabled: true
+    ingress:
+      - ports:
+          - port: 9090
+
+configMaps:
+  gateway: {}

@@ -1,0 +1,37 @@
+{{- if .Values.prometheusRules.enabled }}
+{{- with .Values.prometheusRules }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ template "project.fullname" $ }}
+  labels:
+    {{ include "project.labels" $ | nindent 4 }}
+    {{- if .labels }}
+    {{ toYaml .labels | nindent 4 }}
+    {{- end }}
+  {{- if .annotations }}
+  annotations:
+    {{ toYaml .annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .groups }}
+  groups:
+  {{- range $group := .groups }}
+    - name: {{ $group.name }}
+      rules:
+      {{- range $rule := $group.rules }}
+        - alert: {{ $rule.alert }}
+          for: {{ $rule.for | default "1m" }}
+          expr: {{ $rule.expr }}
+          labels:
+            group: {{ $group.name }}
+            severity: {{ $rule.severity | default "warning" }}
+          annotations:
+            summary: {{ $rule.summary }}
+            message: {{ $rule.message }}
+      {{- end}}
+  {{- end}}
+  {{- end}}
+{{- end }}
+{{- end }}

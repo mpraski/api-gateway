@@ -1,0 +1,16 @@
+{{- range $name, $cm := .Values.configMaps }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "project.fullname" $ }}-{{ $name }}
+  labels:
+    {{ include "project.labels" $ | nindent 4 }}
+  {{- if (hasSuffix "-init" $name) }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+    "helm.sh/hook-weight": "-5"
+  {{- end }}
+data:
+  {{ toYaml $cm | nindent 2 }}
+{{- end }}

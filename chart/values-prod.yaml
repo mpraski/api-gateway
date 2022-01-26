@@ -1,0 +1,38 @@
+deployments:
+  gateway:
+    containers:
+      app:
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 500Mi
+    nodeSelector:
+      cloud.google.com/gke-nodepool: apps-high
+  iban:
+    nodeSelector:
+      cloud.google.com/gke-nodepool: apps-medium
+  default-backend:
+    nodeSelector:
+      cloud.google.com/gke-nodepool: apps-medium
+
+services:
+  public:
+    annotations:
+      cloud.google.com/backend-config: '{"default": "api-gateway-public"}'
+
+ingress:
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: prod-static-ip-name
+    ingress.gcp.kubernetes.io/pre-shared-cert: prod-pre-shared-cert
+    networking.gke.io/v1beta1.FrontendConfig: api-gateway-public
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - path: /*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: api-gateway-public
+                port:
+                  number: 80

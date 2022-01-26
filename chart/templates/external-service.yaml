@@ -1,0 +1,30 @@
+{{- range $name, $external := .Values.externalServices }}
+{{- if $external.enabled }}
+{{- with $external }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  {{- if .name }}
+  name: {{ .name }}
+  {{- else }}
+  name: {{ template "project.fullname" $ }}-{{ $name }}
+  {{- end }}
+  labels:
+    app.kubernetes.io/name: {{ template "project.name" $ }}-{{ $name }}
+    {{ include "project.labels" $ | nindent 4 }}
+    {{- if .labels }}
+    {{ toYaml .labels | nindent 4 }}
+    {{- end }}
+  {{- if .annotations}}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+spec:
+  type: ExternalName
+  externalName: {{ .externalName }}
+{{- end }}
+{{- end }}
+{{- end }}

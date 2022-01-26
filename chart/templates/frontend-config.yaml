@@ -1,0 +1,14 @@
+{{- range $name, $service := .Values.services }}
+{{- if and $service.enabled $service.frontend.enabled }}
+{{- with $service }}
+---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: {{ template "project.fullname" $ }}-{{ $name }}
+spec:
+  redirectToHttps:
+    enabled: true
+{{- end }}
+{{- end }}
+{{- end }}

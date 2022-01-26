@@ -5,8 +5,8 @@ WARN_COLOR=\033[33;01m
 
 SERVICE_NAME=api-gateway
 
-.PHONY: all format lint build
-all: format lint build
+.PHONY: all format lint lint-chart build
+all: format lint lint-chart build
 
 run:
 	@go run main.go
@@ -26,3 +26,13 @@ format:
 lint:
 	@echo "$(OK_COLOR)==> Linting $(SERVICE_NAME)...$(NO_COLOR)"
 	@golangci-lint run
+
+# Helm
+
+lint-chart:
+	@echo "$(OK_COLOR)==> Linting helm chart of $(SERVICE_NAME)... $(NO_COLOR)"
+	@helm lint -f ./chart/values.yaml -f ./chart/values-prod.yaml ./chart
+
+render-chart:
+	@echo "$(OK_COLOR)==> Rendering helm chart of $(SERVICE_NAME)... $(NO_COLOR)"
+	@helm template --output-dir=.chart.rendered -f ./chart/values.yaml -f ./chart/values-prod.yaml ./chart

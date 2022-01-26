@@ -1,0 +1,170 @@
+{{- range $name, $deployment := .Values.deployments }}
+{{- if $deployment.enabled }}
+{{- with $deployment }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "project.fullname" $ }}-{{ $name }}
+  labels:
+    app.kubernetes.io/tier: app
+    {{- include "project.labels" $ | nindent 4 }}
+    {{- if .labels }}
+    {{ toYaml .labels | nindent 4 }}
+    {{- end }}
+  {{- if .annotations}}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ template "project.name" $ }}-{{ $name }}
+      tier: app
+      release: {{ $.Release.Name }}
+  replicas: {{ .replicaCount | default 1 }}
+  strategy:
+    {{ toYaml .strategy | nindent 4 }}
+  revisionHistoryLimit: 10
+  template:
+    metadata:
+      name: {{ template "project.fullname" $ }}-{{ $name }}
+      {{- if .podAnnotations }}
+      annotations:
+        {{ toYaml .podAnnotations | nindent 8 }}
+      {{- end }}
+      labels:
+        app: {{ template "project.fullname" $ }}-{{ $name }}
+        tier: app
+        release: {{ $.Release.Name }}
+        version: {{ $.Chart.AppVersion }}
+        {{- if .labels }}
+        {{ toYaml .labels | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- if .volumes }}
+      {{- with .volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      containers:
+      {{- range $name, $container := .containers }}
+      {{- with $container }}
+      - name: {{ $name }}
+        image: {{ .image.repository }}:{{ .image.tag }}
+        imagePullPolicy: {{ .image.pullPolicy | default "Always" }}
+        {{- if .command }}
+        {{- with .command }}
+        command:
+          {{- toYaml . | nindent 10 }}
+        {{- end}}
+        {{- end}}
+        {{- if .args }}
+        {{- with .args }}
+        args:
+          {{- toYaml . | nindent 10 }}
+        {{- end}}
+        {{- end}}
+        {{- if .volumeMounts }}
+        {{- with .volumeMounts }}
+        volumeMounts:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- end }}
+        {{- if or (.configMap) ($.Values.secrets) }}
+        envFrom:
+        {{- if .configMap }}
+          - configMapRef:
+              name: {{ template "project.fullname" $ }}-{{ .configMap }}
+        {{- end }}
+        {{- if $.Values.secrets }}
+          - secretRef:
+              name: {{ template "project.fullname" $ }}
+        {{- end }}
+        {{- end }}
+        env:
+          - name: KUBERNETES_NODE_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
+        ports:
+        {{- if .http.enabled }}
+        - name: http
+          containerPort: {{ .http.port | default 8080 }}
+          protocol: {{ .http.protocol | default "TCP" }}
+        {{- end }}
+        {{- if .internal.enabled }}
+        - name: internal
+          containerPort: {{ .internal.port | default 8081 }}
+          protocol: {{ .internal.protocol | default "TCP" }}
+        {{- end }}
+        {{- if .probe.enabled }}
+        - name: http-probe
+          containerPort: {{ .probe.port | default 9090 }}
+          protocol: {{ .probe.protocol | default "TCP" }}
+        {{- end }}
+        {{- if and .livenessProbe .livenessProbe.enabled }}
+        {{- with .livenessProbe }}
+        livenessProbe:
+          httpGet:
+            path: {{ .path | default "/healthz" }}
+            port: {{ .port | default "http-probe" }}
+          initialDelaySeconds: {{ .initialDelaySeconds | default 10 }}
+          periodSeconds: {{ .periodSeconds | default 10 }}
+          timeoutSeconds: {{ .timeoutSeconds | default 1 }}
+          successThreshold: {{ .successThreshold | default 1 }}
+          failureThreshold: {{ .failureThreshold | default 3 }}
+        {{- end }}
+        {{- end }}
+        {{- if and .readinessProbe .readinessProbe.enabled }}
+        {{- with .readinessProbe }}
+        readinessProbe:
+          httpGet:
+            path: {{ .path | default "/healthz" }}
+            port: {{ .port | default "http-probe" }}
+          initialDelaySeconds: {{ .initialDelaySeconds | default 10 }}
+          periodSeconds: {{ .periodSeconds | default 10 }}
+          timeoutSeconds: {{ .timeoutSeconds | default 1 }}
+          successThreshold: {{ .successThreshold | default 1 }}
+          failureThreshold: {{ .failureThreshold | default 3 }}
+        {{- end }}
+        {{- end }}
+        {{- if .resources }}
+        {{- with .resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- if .nodeSelector }}
+      {{- with .nodeSelector }}
+      nodeSelector:
+        {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- if .affinity }}
+      {{- with .affinity }}
+      affinity:
+        {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- if .tolerations }}
+      {{- with .tolerations }}
+      tolerations:
+        {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- if .securityContext }}
+      {{- with .securityContext }}
+      securityContext:
+        {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      serviceAccountName: {{ template "project.serviceAccountName" $ }}
+{{- end }}
+{{- end }}
+{{- end }}
