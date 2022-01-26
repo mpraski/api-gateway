@@ -19,6 +19,6 @@ spec:
     matchLabels:
       {{- toYaml .matchLabels | nindent 6 }}
   endpoints:
-  - port: http
+  - port: http-probe
   {{- end }}
 {{- end }}

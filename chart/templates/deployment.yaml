@@ -97,7 +97,7 @@ spec:
           protocol: {{ .http.protocol | default "TCP" }}
         {{- end }}
         {{- if .internal.enabled }}
-        - name: internal
+        - name: http-internal
           containerPort: {{ .internal.port | default 8081 }}
           protocol: {{ .internal.protocol | default "TCP" }}
         {{- end }}

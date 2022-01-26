@@ -45,6 +45,8 @@ services:
       enabled: true
     internal:
       enabled: false
+    probe:
+      enabled: false
     backend:
       enabled: true
     frontend:
@@ -58,6 +60,21 @@ services:
       enabled: false
     internal:
       enabled: true
+    probe:
+      enabled: false
+    backend:
+      enabled: false
+    frontend:
+      enabled: false
+  probe:
+    enabled: true
+    type: ClusterIP
+    http:
+      enabled: false
+    internal:
+      enabled: false
+    probe:
+      enabled: true
     backend:
       enabled: false
     frontend:
@@ -68,7 +85,7 @@ serviceMonitor:
   labels:
     release: kube-prometheus-stack
   matchLabels:
-    app: api-gateway-public
+    service: api-gateway-probe
 
 prometheusRules:
   enabled: false

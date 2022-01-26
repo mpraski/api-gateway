@@ -7,7 +7,7 @@ kind: Service
 metadata:
   name: {{ template "project.fullname" $ }}-{{ $name }}
   labels:
-    app: {{ template "project.fullname" $ }}-{{ $name }}
+    service: {{ template "project.fullname" $ }}-{{ $name }}
     {{ include "project.labels" $ | nindent 4 }}
     {{- if .labels }}
     {{ toYaml .labels | nindent 4 }}
@@ -31,7 +31,13 @@ spec:
     - port: {{ .internal.port | default 80 }}
       targetPort: {{ .internal.targetPort | default "internal" }}
       protocol: TCP
-      name: grpc
+      name: http-internal
+    {{- end }}
+    {{- if .probe.enabled }}
+    - port: {{ .internal.port | default 9090 }}
+      targetPort: {{ .probe.targetPort | default "http-probe" }}
+      protocol: TCP
+      name: http-probe
     {{- end }}
   selector:
     app: {{ template "project.fullname" $ }}-{{ $name }}
