@@ -5,17 +5,17 @@ import (
 	"time"
 )
 
-type BackoffStore struct {
+type BackoffSource struct {
 	tries   int
 	backoff time.Duration
-	getter  Getter
+	source  Source
 }
 
-func NewBackoffStore(tries int, backoff time.Duration, getter Getter) *BackoffStore {
-	return &BackoffStore{tries: tries, backoff: backoff, getter: getter}
+func NewBackoffSource(tries int, backoff time.Duration, source Source) *BackoffSource {
+	return &BackoffSource{tries: tries, backoff: backoff, source: source}
 }
 
-func (s *BackoffStore) Get(ctx context.Context, name string) (Secret, error) {
+func (s *BackoffSource) Get(ctx context.Context, name string) (Secret, error) {
 	var (
 		secret []byte
 		err    error
@@ -24,7 +24,7 @@ func (s *BackoffStore) Get(ctx context.Context, name string) (Secret, error) {
 	for i := 0; i < s.tries; i++ {
 		time.Sleep(s.backoff)
 
-		if secret, err = s.getter.Get(ctx, name); err == nil {
+		if secret, err = s.source.Get(ctx, name); err == nil {
 			return secret, nil
 		}
 	}

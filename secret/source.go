@@ -5,7 +5,7 @@ import "context"
 type (
 	Secret = []byte
 
-	Getter interface {
+	Source interface {
 		Get(context.Context, string) (Secret, error)
 	}
 )

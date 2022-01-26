@@ -5,10 +5,10 @@ import (
 	"os"
 )
 
-type FileStore struct{}
+type FileSource struct{}
 
-func NewFileStore() *FileStore { return &FileStore{} }
+func NewFileSource() *FileSource { return &FileSource{} }
 
-func (s *FileStore) Get(_ context.Context, name string) (Secret, error) {
+func (s *FileSource) Get(_ context.Context, name string) (Secret, error) {
 	return os.ReadFile(name)
 }

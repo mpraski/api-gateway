@@ -19,9 +19,10 @@ type (
 	}
 
 	routeConfig struct {
-		Prefix  string `yaml:"prefix"`
-		Rewrite string `yaml:"rewrite"`
-		Private bool   `yaml:"private"`
+		Prefix        string `yaml:"prefix"`
+		Rewrite       string `yaml:"rewrite"`
+		Private       bool   `yaml:"private"`
+		Authenticated *bool  `yaml:"authenticated"`
 	}
 
 	route struct {
@@ -61,12 +62,17 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 			r := r
 
 			var (
-				prefix      = filepath.Clean(r.Prefix)
-				prefixSlash = prefix
+				prefix        = filepath.Clean(r.Prefix)
+				prefixSlash   = prefix
+				authenticated = s.Authenticated
 			)
 
 			if !strings.HasSuffix(prefixSlash, "/") {
 				prefixSlash += "/"
+			}
+
+			if r.Authenticated != nil {
+				authenticated = *r.Authenticated
 			}
 
 			routes = append(routes, route{
@@ -75,7 +81,7 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 				Target:        u,
 				Rewrite:       r.Rewrite,
 				Private:       r.Private,
-				Authenticated: s.Authenticated,
+				Authenticated: authenticated,
 			})
 		}
 	}

@@ -10,8 +10,8 @@ services:
       - prefix: /service-a/metrics
         private: true
   example-service-2:
-    authenticated: true
     target: https://immunkarte.de/v2
+    authenticated: true
     routes:
       - prefix: /service-b
         rewrite: /
@@ -27,4 +27,3 @@ secrets:
     privateKey: examples/pkey.pem
   value:
     publicKey: examples/key.pem
-    privateKey: examples/pkey.pem

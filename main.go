@@ -18,7 +18,6 @@ import (
 	"github.com/mpraski/api-gateway/proxy"
 	"github.com/mpraski/api-gateway/service"
 	"github.com/mpraski/api-gateway/store"
-	"github.com/mpraski/api-gateway/token"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -33,9 +32,7 @@ type (
 	}
 
 	input struct {
-		Proxy struct {
-			Config string `required:"true"`
-		}
+		Config string `required:"true"`
 		Server struct {
 			timeouts
 			Address string `default:":8080"`
@@ -83,19 +80,21 @@ func main() {
 	}
 
 	var (
-		proxyConfig = strings.NewReader(i.Proxy.Config)
-		storeGetter = store.NewMemoryStore()
+		proxyConfig = strings.NewReader(i.Config)
+		memoryStore = store.NewMemoryStore()
 	)
 
-	factory, err := authentication.NewFactory(proxyConfig, storeGetter)
+	factory, err := authentication.NewFactory(rootCtx, proxyConfig, memoryStore, memoryStore)
 	if err != nil {
 		logger.Fatalf("failed to initialize authentication scheme factory: %v\n", err)
 	}
 
-	scheme, err := factory.New(rootCtx, authentication.Phantom)
+	scheme, err := factory.New(authentication.Phantom)
 	if err != nil {
 		logger.Fatalf("failed to initialize phantom authentication scheme: %v\n", err)
 	}
+
+	reference := factory.NewReference()
 
 	var (
 		deps sync.WaitGroup
@@ -105,7 +104,7 @@ func main() {
 
 	deps.Add(depsSize)
 
-	internal := newInternalServer(&i)
+	internal := newInternalServer(&i, reference)
 
 	go func() {
 		logger.Println("starting internal server at", i.Internal.Address)
@@ -198,10 +197,12 @@ func healthz() http.Handler {
 	})
 }
 
-func newInternalServer(cfg *input) *http.Server {
+func newInternalServer(cfg *input, reference *authentication.TokenReference) *http.Server {
 	router := http.NewServeMux()
 
-	router.Handle("/internal/tokens", http.HandlerFunc(service.NewTokenReferenceServer(nil).HandleAssociation))
+	router.Handle("/internal/tokens", http.HandlerFunc(
+		service.NewTokenReferenceServer(reference).HandleAssociation,
+	))
 
 	return &http.Server{
 		Addr:         cfg.Internal.Address,
@@ -223,39 +224,5 @@ func newObservabilityServer(cfg *input) *http.Server {
 		WriteTimeout: cfg.Observability.WriteTimeout,
 		IdleTimeout:  cfg.Observability.IdleTimeout,
 		Handler:      router,
-	}
-}
-
-// nolint:deadcode,unused // Only for local testing
-func test() {
-	key, err := os.Open("examples/key.pem")
-	if err != nil {
-		panic(err)
-	}
-	defer key.Close()
-
-	pkey, err := os.Open("examples/pkey.pem")
-	if err != nil {
-		panic(err)
-	}
-	defer key.Close()
-
-	ri, err := token.NewReferenceIssuer(pkey)
-	if err != nil {
-		panic(err)
-	}
-
-	rp, err := token.NewReferenceParser(key)
-	if err != nil {
-		panic(err)
-	}
-
-	t, err := ri.Issue()
-	if err != nil {
-		panic(err)
-	}
-
-	if _, err = rp.Parse(t.String()); err != nil {
-		panic(err)
 	}
 }

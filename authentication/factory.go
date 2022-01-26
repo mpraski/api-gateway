@@ -15,8 +15,11 @@ import (
 )
 
 type Factory struct {
-	store   store.Getter
-	secrets *secretsConfig
+	getter          store.Getter
+	setter          store.Setter
+	referenceParser token.Parser
+	referenceIssuer token.Issuer
+	valueParser     token.Parser
 }
 
 var (
@@ -24,52 +27,80 @@ var (
 	ErrUknownSecretSource = errors.New("unknown secret source")
 )
 
-func NewFactory(configDataSource io.Reader, getter store.Getter) (*Factory, error) {
+func NewFactory(
+	ctx context.Context,
+	configDataSource io.Reader,
+	getter store.Getter,
+	setter store.Setter,
+) (*Factory, error) {
 	secrets, err := parseSecrets(configDataSource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse secrets: %w", err)
 	}
 
-	return &Factory{secrets: secrets, store: getter}, nil
+	keys, err := loadKeys(ctx, secrets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load keys: %w", err)
+	}
+
+	rp, err := token.NewReferenceParser(bytes.NewReader(keys[0]))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create reference token parser: %w", err)
+	}
+
+	ri, err := token.NewReferenceIssuer(bytes.NewReader(keys[1]))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create reference token issuer: %w", err)
+	}
+
+	vp, err := token.NewJWTParser(bytes.NewReader(keys[2]))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create value token parser: %w", err)
+	}
+
+	return &Factory{
+		getter:          getter,
+		setter:          setter,
+		referenceParser: rp,
+		referenceIssuer: ri,
+		valueParser:     vp,
+	}, nil
 }
 
-func (f *Factory) New(ctx context.Context, scheme SchemeType) (Scheme, error) {
+func (f *Factory) New(scheme SchemeType) (Scheme, error) {
 	if scheme == Phantom {
-		r, v, err := loadPublicKeys(ctx, f.secrets)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load public keys: %w", err)
-		}
-
-		rp, err := token.NewReferenceParser(bytes.NewReader(r))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create reference token parser: %w", err)
-		}
-
-		vp, err := token.NewJWTParser(bytes.NewReader(v))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create value token parser: %w", err)
-		}
-
-		return NewPhantomAuthenticator(f.store, rp, vp), nil
+		return NewPhantomAuthenticator(f.getter, f.referenceParser, f.valueParser), nil
 	}
 
 	return nil, ErrUknownScheme
 }
 
-func loadPublicKeys(ctx context.Context, secrets *secretsConfig) (reference, value []byte, err error) {
-	getter, closer, err := makeGetter(secrets.Source)
+func (f *Factory) NewReference() *TokenReference {
+	return NewTokenReference(
+		f.setter,
+		f.valueParser,
+		f.referenceParser,
+		f.referenceIssuer,
+	)
+}
+
+func loadKeys(ctx context.Context, secrets *secretsConfig) ([3][]byte, error) {
+	source, closer, err := makeSource(secrets.Source)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create secret getter: %w", err)
+		return [3][]byte{}, fmt.Errorf("failed to create secret getter: %w", err)
 	}
 
 	defer closer()
 
+	group, ctx := errgroup.WithContext(ctx)
+
 	var (
-		parser = func(name string, key *[]byte) func() error {
+		keys  [3][]byte
+		parse = func(name string, key *[]byte) func() error {
 			return func() error {
-				r, err := getter.Get(ctx, name)
+				r, err := source.Get(ctx, name)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to load secret key: %w", err)
 				}
 
 				*key = r
@@ -79,32 +110,31 @@ func loadPublicKeys(ctx context.Context, secrets *secretsConfig) (reference, val
 		}
 	)
 
-	group, ctx := errgroup.WithContext(ctx)
-
-	group.Go(parser(secrets.Reference.PublicKey, &reference))
-	group.Go(parser(secrets.Value.PublicKey, &value))
+	group.Go(parse(secrets.Reference.PublicKey, &keys[0]))
+	group.Go(parse(secrets.Reference.PrivateKey, &keys[1]))
+	group.Go(parse(secrets.Value.PublicKey, &keys[2]))
 
 	if err := group.Wait(); err != nil {
-		return nil, nil, fmt.Errorf("failed to load public key: %w", err)
+		return [3][]byte{}, fmt.Errorf("failed to load key: %w", err)
 	}
 
-	return reference, value, nil
+	return keys, nil
 }
 
 const backoff = 3
 
-func makeGetter(source string) (secret.Getter, func(), error) {
-	switch source {
+func makeSource(sourceName string) (secret.Source, func(), error) {
+	switch sourceName {
 	case "gsm":
 		gsm, err := secret.NewGoogleSecretManager()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create google secret manager client: %w", err)
 		}
 
-		return secret.NewBackoffStore(backoff, backoff*time.Second, gsm), gsm.Close, nil
+		return secret.NewBackoffSource(backoff, backoff*time.Second, gsm), gsm.Close, nil
 
 	case "file":
-		return secret.NewFileStore(), func() {}, nil
+		return secret.NewFileSource(), func() {}, nil
 	}
 
 	return nil, nil, ErrUknownSecretSource
