@@ -48,7 +48,7 @@ func (p *Proxy) Handler() http.Handler {
 			}
 		}
 
-		if route == nil || route.Private {
+		if route == nil {
 			http.NotFound(w, r)
 			return
 		}

@@ -23,7 +23,7 @@ make compile
 To run with example config:
 
 ```bash
-API_GATEWAY_CONFIG=$(cat examples/config.yaml) make run
+API_GATEWAY_CONFIG=$(cat example/config.yaml) make run
 ```
 
 ## Authors

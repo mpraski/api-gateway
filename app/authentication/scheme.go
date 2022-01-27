@@ -15,6 +15,7 @@ type (
 )
 
 const (
+	Unauthorized        = "unauthorized"
 	OAuth2Introspection = "oauth2-introspection"
 )
 
@@ -35,8 +36,15 @@ func MakeSchemes(configDataSource io.Reader) (Schemes, error) {
 
 	schemes := make(map[string]Scheme)
 
+	schemes[Unauthorized] = NewUnauthorizedAuthenticator()
+
 	if c.OAuth2Introspection != nil {
-		schemes[OAuth2Introspection] = NewOAuth2InstrospectionAuthenticator(c.OAuth2Introspection.BaseURL)
+		s, err := NewOAuth2InstrospectionAuthenticator(c.OAuth2Introspection.BaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create %s scheme: %w", OAuth2Introspection, err)
+		}
+
+		schemes[OAuth2Introspection] = s
 	}
 
 	return schemes, nil

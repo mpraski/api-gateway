@@ -18,8 +18,6 @@ deployments:
           tag: latest
         http:
           enabled: true
-        internal:
-          enabled: true
         probe:
           enabled: true
         livenessProbe:
@@ -43,8 +41,6 @@ services:
     type: ClusterIP
     http:
       enabled: true
-    internal:
-      enabled: false
     probe:
       enabled: false
     backend:
@@ -53,25 +49,10 @@ services:
       enabled: true
     annotations:
       cloud.google.com/neg: '{"ingress": true}'
-  internal:
-    enabled: true
-    type: ClusterIP
-    http:
-      enabled: false
-    internal:
-      enabled: true
-    probe:
-      enabled: false
-    backend:
-      enabled: false
-    frontend:
-      enabled: false
   probe:
     enabled: true
     type: ClusterIP
     http:
-      enabled: false
-    internal:
       enabled: false
     probe:
       enabled: true
@@ -102,15 +83,6 @@ ingress:
   enabled: true
 
 networkPolicies:
-  internal:
-    enabled: true
-    ingress:
-      - from:
-          - podSelector:
-              matchLabels:
-                team: auth-internal
-      - ports:
-          - port: 8081
   monitoring:
     enabled: true
     ingress:

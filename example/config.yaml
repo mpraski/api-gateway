@@ -6,9 +6,9 @@ services:
       - prefix: /service-a
         rewrite: /
       - prefix: /service-a/healthz
-        private: true
+        authentication: unauthorized
       - prefix: /service-a/metrics
-        private: true
+        authentication: unauthorized
   example-service-2:
     target: https://immunkarte.de/v2
     authentication: oauth2-introspection
@@ -16,9 +16,9 @@ services:
       - prefix: /service-b
         rewrite: /
       - prefix: /service-b/healthz
-        private: true
+        authentication: unauthorized
       - prefix: /service-b/metrics
-        private: true
+        authentication: unauthorized
 
 authentication:
   oauth2-introspection:

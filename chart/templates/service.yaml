@@ -27,14 +27,8 @@ spec:
       protocol: TCP
       name: http
     {{- end }}
-    {{- if .internal.enabled }}
-    - port: {{ .internal.port | default 80 }}
-      targetPort: {{ .internal.targetPort | default "internal" }}
-      protocol: TCP
-      name: http-internal
-    {{- end }}
     {{- if .probe.enabled }}
-    - port: {{ .internal.port | default 80 }}
+    - port: {{ .probe.port | default 80 }}
       targetPort: {{ .probe.targetPort | default "http-probe" }}
       protocol: TCP
       name: http-probe

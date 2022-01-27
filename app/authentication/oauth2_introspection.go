@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/mpraski/api-gateway/app/cache"
 )
 
 type (
@@ -30,12 +32,16 @@ type (
 
 	OAuth2InstrospectionAuthenticator struct {
 		client  *http.Client
+		tokens  cache.Cache
 		baseURL string
 	}
 )
 
 const (
 	tokenLength   = 2
+	numCounters   = 10000
+	maxCost       = 100000000
+	expiry        = time.Minute
 	clientTimeout = time.Second * 15
 )
 
@@ -93,13 +99,19 @@ func (i *Introspection) Validate() error {
 	return nil
 }
 
-func NewOAuth2InstrospectionAuthenticator(baseURL string) *OAuth2InstrospectionAuthenticator {
+func NewOAuth2InstrospectionAuthenticator(baseURL string) (*OAuth2InstrospectionAuthenticator, error) {
+	tokens, err := cache.NewInMemory(numCounters, maxCost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize token cache: %w", err)
+	}
+
 	return &OAuth2InstrospectionAuthenticator{
 		baseURL: baseURL,
+		tokens:  tokens,
 		client: &http.Client{
 			Timeout: clientTimeout,
 		},
-	}
+	}, nil
 }
 
 func (a *OAuth2InstrospectionAuthenticator) Authenticate(r *http.Request) error {
@@ -108,13 +120,32 @@ func (a *OAuth2InstrospectionAuthenticator) Authenticate(r *http.Request) error 
 		return ErrTokenMissing
 	}
 
-	i, err := a.introspect(r.Context(), t)
-	if err != nil {
-		return fmt.Errorf("failed to introspect token: %w", err)
+	var (
+		f   bool
+		v   []byte
+		i   *Introspection
+		err error
+	)
+
+	if v, f = a.tokens.Get(t); f {
+		if err = json.Unmarshal(v, i); err != nil {
+			i = nil
+		}
 	}
 
-	if err := i.Validate(); err != nil {
-		return fmt.Errorf("failed to validate introspection: %w", err)
+	if i == nil {
+		i, err = a.introspect(r.Context(), t)
+		if err != nil {
+			return fmt.Errorf("failed to introspect token: %w", err)
+		}
+
+		if err = i.Validate(); err != nil {
+			return fmt.Errorf("failed to validate introspection: %w", err)
+		}
+
+		if v, err = json.Marshal(i); err == nil {
+			a.tokens.Set(t, v, expiry)
+		}
 	}
 
 	r.Header.Set("X-Subject", i.Subject)

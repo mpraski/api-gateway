@@ -19,9 +19,9 @@ type (
 	}
 
 	routeConfig struct {
-		Prefix  string `yaml:"prefix"`
-		Rewrite string `yaml:"rewrite"`
-		Private bool   `yaml:"private"`
+		Prefix         string  `yaml:"prefix"`
+		Rewrite        string  `yaml:"rewrite"`
+		Authentication *string `yaml:"authentication"`
 	}
 
 	route struct {
@@ -29,7 +29,6 @@ type (
 		Prefix         string
 		PrefixSlash    string
 		Rewrite        string
-		Private        bool
 		Authentication *string
 	}
 )
@@ -47,7 +46,7 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 		return nil, fmt.Errorf("failed to decode config data: %w", err)
 	}
 
-	var routes = make([]route, 0, len(c.Services))
+	var routes = make([]route, 0)
 
 	for _, s := range c.Services {
 		s := s
@@ -61,12 +60,17 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 			r := r
 
 			var (
-				prefix      = filepath.Clean(r.Prefix)
-				prefixSlash = prefix
+				prefix         = filepath.Clean(r.Prefix)
+				prefixSlash    = prefix
+				authentication = s.Authentication
 			)
 
 			if !strings.HasSuffix(prefixSlash, "/") {
 				prefixSlash += "/"
+			}
+
+			if r.Authentication != nil {
+				authentication = r.Authentication
 			}
 
 			routes = append(routes, route{
@@ -74,8 +78,7 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 				PrefixSlash:    prefixSlash,
 				Target:         u,
 				Rewrite:        r.Rewrite,
-				Private:        r.Private,
-				Authentication: s.Authentication,
+				Authentication: authentication,
 			})
 		}
 	}

@@ -96,11 +96,6 @@ spec:
           containerPort: {{ .http.port | default 8080 }}
           protocol: {{ .http.protocol | default "TCP" }}
         {{- end }}
-        {{- if .internal.enabled }}
-        - name: http-internal
-          containerPort: {{ .internal.port | default 8081 }}
-          protocol: {{ .internal.protocol | default "TCP" }}
-        {{- end }}
         {{- if .probe.enabled }}
         - name: http-probe
           containerPort: {{ .probe.port | default 9090 }}
