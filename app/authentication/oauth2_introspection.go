@@ -14,6 +14,8 @@ import (
 )
 
 type (
+	Scope []string
+
 	Audience []string
 
 	Introspection struct {
@@ -25,7 +27,7 @@ type (
 		TokenType string                 `json:"token_type"`
 		Issuer    string                 `json:"iss"`
 		ClientID  string                 `json:"client_id,omitempty"`
-		Scope     string                 `json:"scope,omitempty"`
+		Scope     Scope                  `json:"scope,omitempty"`
 		Expires   int64                  `json:"exp"`
 		TokenUse  string                 `json:"token_use"`
 	}
@@ -46,12 +48,25 @@ const (
 )
 
 var (
-	ErrTokenMissing    = errors.New("failed to extract token from header")
-	ErrInvalidAudience = errors.New("invalid audience value")
-	ErrNotAccessToken  = errors.New("token in use is not an access token")
-	ErrTokenInactive   = errors.New("token is inactive")
-	ErrTokenExpired    = errors.New("token is expired")
+	ErrTokenMissing      = errors.New("failed to extract token from header")
+	ErrInvalidAudience   = errors.New("invalid audience value")
+	ErrInvalidScope      = errors.New("invalid scope value")
+	ErrNotAccessToken    = errors.New("token in use is not an access token")
+	ErrTokenInactive     = errors.New("token is inactive")
+	ErrTokenExpired      = errors.New("token is expired")
+	ErrInsufficientScope = errors.New("scope is insufficient")
 )
+
+func (s *Scope) UnmarshalJSON(b []byte) error {
+	var scopes string
+	if err := json.Unmarshal(b, &scopes); err == nil {
+		*s = strings.Fields(scopes)
+
+		return nil
+	}
+
+	return ErrInvalidScope
+}
 
 func (a *Audience) UnmarshalJSON(b []byte) error {
 	var single string
@@ -71,7 +86,7 @@ func (a *Audience) UnmarshalJSON(b []byte) error {
 	return ErrInvalidAudience
 }
 
-func (i *Introspection) Validate() error {
+func (i *Introspection) Validate(args Args) error {
 	if len(i.TokenUse) > 0 && i.TokenUse != "access_token" {
 		return ErrNotAccessToken
 	}
@@ -86,6 +101,14 @@ func (i *Introspection) Validate() error {
 
 	if len(i.Extra) == 0 {
 		i.Extra = map[string]interface{}{}
+	}
+
+	if requiredScopesVal, ok := args["requiredScopes"]; ok {
+		if requiredScopes, ok := requiredScopesVal.([]string); ok {
+			if !isContained(requiredScopes, i.Scope) {
+				return ErrInsufficientScope
+			}
+		}
 	}
 
 	i.Extra["username"] = i.Username
@@ -114,7 +137,7 @@ func NewOAuth2InstrospectionAuthenticator(baseURL string) (*OAuth2Instrospection
 	}, nil
 }
 
-func (a *OAuth2InstrospectionAuthenticator) Authenticate(r *http.Request) error {
+func (a *OAuth2InstrospectionAuthenticator) Authenticate(r *http.Request, args Args) error {
 	t, ok := extractToken(r)
 	if !ok {
 		return ErrTokenMissing
@@ -139,7 +162,7 @@ func (a *OAuth2InstrospectionAuthenticator) Authenticate(r *http.Request) error 
 			return fmt.Errorf("failed to introspect token: %w", err)
 		}
 
-		if err = i.Validate(); err != nil {
+		if err = i.Validate(args); err != nil {
 			return fmt.Errorf("failed to validate introspection: %w", err)
 		}
 
@@ -151,8 +174,12 @@ func (a *OAuth2InstrospectionAuthenticator) Authenticate(r *http.Request) error 
 	r.Header.Set("X-Subject", i.Subject)
 	r.Header.Set("X-Issuer", i.Issuer)
 	r.Header.Set("X-Client-ID", i.ClientID)
-	r.Header.Set("X-Scope", i.Scope)
+	r.Header.Del("X-Scope")
 	r.Header.Del("X-Audience")
+
+	for _, s := range i.Scope {
+		r.Header.Add("X-Scope", s)
+	}
 
 	for _, a := range i.Audience {
 		r.Header.Add("X-Audience", a)
@@ -193,4 +220,22 @@ func extractToken(r *http.Request) (value string, found bool) {
 	}
 
 	return
+}
+
+func isContained(a, b []string) bool {
+	for _, i := range a {
+		var f bool
+
+		for _, j := range b {
+			if f = i == j; f {
+				break
+			}
+		}
+
+		if !f {
+			return false
+		}
+	}
+
+	return true
 }

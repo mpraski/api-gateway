@@ -54,13 +54,13 @@ func (p *Proxy) Handler() http.Handler {
 		}
 
 		if route.Authentication != nil {
-			a, ok := p.schemes[*route.Authentication]
+			a, ok := p.schemes[route.Authentication.Name]
 			if !ok {
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
 			}
 
-			if err := a.Authenticate(r); err != nil {
+			if err := a.Authenticate(r, route.Authentication.Args); err != nil {
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
 			}

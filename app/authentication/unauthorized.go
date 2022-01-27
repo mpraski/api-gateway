@@ -13,7 +13,7 @@ func NewUnauthorizedAuthenticator() *UnauthorizedAuthenticator {
 	return &UnauthorizedAuthenticator{}
 }
 
-func (a *UnauthorizedAuthenticator) Authenticate(r *http.Request) error {
+func (a *UnauthorizedAuthenticator) Authenticate(r *http.Request, _ Args) error {
 	ClearHeaders(r)
 
 	return ErrUnauthorized

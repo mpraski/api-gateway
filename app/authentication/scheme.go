@@ -7,8 +7,10 @@ import (
 )
 
 type (
+	Args map[string]interface{}
+
 	Scheme interface {
-		Authenticate(*http.Request) error
+		Authenticate(*http.Request, Args) error
 	}
 
 	Schemes map[string]Scheme
@@ -19,14 +21,20 @@ const (
 	OAuth2Introspection = "oauth2-introspection"
 )
 
-var sensitiveHeaders = []string{
-	"X-Subject",
-	"X-Issuer",
-	"X-Client-ID",
-	"X-Scope",
-	"X-Audience",
-	"Authorization",
-}
+var (
+	sensitiveHeaders = []string{
+		"X-Subject",
+		"X-Issuer",
+		"X-Client-ID",
+		"X-Scope",
+		"X-Audience",
+		"Authorization",
+	}
+	SupportedSchemes = []string{
+		Unauthorized,
+		OAuth2Introspection,
+	}
+)
 
 func MakeSchemes(configDataSource io.Reader) (Schemes, error) {
 	c, err := parseConfig(configDataSource)

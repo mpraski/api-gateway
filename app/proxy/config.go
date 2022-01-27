@@ -8,20 +8,28 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mpraski/api-gateway/app/authentication"
 	"gopkg.in/yaml.v2"
 )
 
 type (
+	authScheme *map[string]map[string]interface{}
+
+	authConfig struct {
+		Name string
+		Args map[string]interface{}
+	}
+
 	service struct {
 		Target         string        `yaml:"target"`
 		Routes         []routeConfig `yaml:"routes,flow"`
-		Authentication *string       `yaml:"authentication"`
+		Authentication authScheme    `yaml:"authentication"`
 	}
 
 	routeConfig struct {
-		Prefix         string  `yaml:"prefix"`
-		Rewrite        string  `yaml:"rewrite"`
-		Authentication *string `yaml:"authentication"`
+		Prefix         string     `yaml:"prefix"`
+		Rewrite        string     `yaml:"rewrite"`
+		Authentication authScheme `yaml:"authentication"`
 	}
 
 	route struct {
@@ -29,7 +37,7 @@ type (
 		Prefix         string
 		PrefixSlash    string
 		Rewrite        string
-		Authentication *string
+		Authentication *authConfig
 	}
 )
 
@@ -60,9 +68,9 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 			r := r
 
 			var (
-				prefix         = filepath.Clean(r.Prefix)
-				prefixSlash    = prefix
-				authentication = s.Authentication
+				prefix      = filepath.Clean(r.Prefix)
+				prefixSlash = prefix
+				auth        = s.Authentication
 			)
 
 			if !strings.HasSuffix(prefixSlash, "/") {
@@ -70,7 +78,20 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 			}
 
 			if r.Authentication != nil {
-				authentication = r.Authentication
+				auth = r.Authentication
+			}
+
+			var authCfg *authConfig
+
+			if auth != nil {
+				for _, a := range authentication.SupportedSchemes {
+					if args, ok := (*auth)[a]; ok {
+						authCfg = &authConfig{
+							Name: a,
+							Args: args,
+						}
+					}
+				}
 			}
 
 			routes = append(routes, route{
@@ -78,7 +99,7 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 				PrefixSlash:    prefixSlash,
 				Target:         u,
 				Rewrite:        r.Rewrite,
-				Authentication: authentication,
+				Authentication: authCfg,
 			})
 		}
 	}

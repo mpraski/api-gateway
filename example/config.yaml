@@ -1,24 +1,32 @@
 services:
   example-service:
     target: http://n-gate.com
-    authentication: oauth2-introspection
+    authentication:
+      oauth2-introspection:
+        requiredScopes: [read, write]
     routes:
       - prefix: /service-a
         rewrite: /
       - prefix: /service-a/healthz
-        authentication: unauthorized
+        authentication:
+          unauthorized: {}
       - prefix: /service-a/metrics
-        authentication: unauthorized
+        authentication:
+          unauthorized: {}
   example-service-2:
     target: https://immunkarte.de/v2
-    authentication: oauth2-introspection
+    authentication:
+      oauth2-introspection:
+        requiredScopes: [read, write]
     routes:
       - prefix: /service-b
         rewrite: /
       - prefix: /service-b/healthz
-        authentication: unauthorized
+        authentication:
+          unauthorized: {}
       - prefix: /service-b/metrics
-        authentication: unauthorized
+        authentication:
+          unauthorized: {}
 
 authentication:
   oauth2-introspection:
