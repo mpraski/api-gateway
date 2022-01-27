@@ -9,14 +9,14 @@ import (
 	"path"
 	"strings"
 
-	"github.com/mpraski/api-gateway/authentication"
+	"github.com/mpraski/api-gateway/app/authentication"
 )
 
 type (
 	Proxy struct {
-		routes []route
-		scheme authentication.Scheme
-		proxy  *httputil.ReverseProxy
+		routes  []route
+		schemes authentication.Schemes
+		proxy   *httputil.ReverseProxy
 	}
 
 	contextKey uint
@@ -24,16 +24,16 @@ type (
 
 const routeKey contextKey = 10
 
-func New(configDataSource io.Reader, scheme authentication.Scheme) (*Proxy, error) {
+func New(configDataSource io.Reader, schemes authentication.Schemes) (*Proxy, error) {
 	r, err := parseRoutes(configDataSource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse proxy routes: %w", err)
 	}
 
 	return &Proxy{
-		routes: r,
-		scheme: scheme,
-		proxy:  newReverseProxy(),
+		routes:  r,
+		schemes: schemes,
+		proxy:   newReverseProxy(),
 	}, nil
 }
 
@@ -53,8 +53,14 @@ func (p *Proxy) Handler() http.Handler {
 			return
 		}
 
-		if route.Authenticated {
-			if err := p.scheme.Authenticate(r); err != nil {
+		if route.Authentication != nil {
+			a, ok := p.schemes[*route.Authentication]
+			if !ok {
+				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				return
+			}
+
+			if err := a.Authenticate(r); err != nil {
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
 			}

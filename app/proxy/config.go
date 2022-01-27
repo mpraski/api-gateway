@@ -13,25 +13,24 @@ import (
 
 type (
 	service struct {
-		Target        string        `yaml:"target"`
-		Routes        []routeConfig `yaml:"routes,flow"`
-		Authenticated bool          `yaml:"authenticated"`
+		Target         string        `yaml:"target"`
+		Routes         []routeConfig `yaml:"routes,flow"`
+		Authentication *string       `yaml:"authentication"`
 	}
 
 	routeConfig struct {
-		Prefix        string `yaml:"prefix"`
-		Rewrite       string `yaml:"rewrite"`
-		Private       bool   `yaml:"private"`
-		Authenticated *bool  `yaml:"authenticated"`
+		Prefix  string `yaml:"prefix"`
+		Rewrite string `yaml:"rewrite"`
+		Private bool   `yaml:"private"`
 	}
 
 	route struct {
-		Target        *url.URL
-		Prefix        string
-		PrefixSlash   string
-		Rewrite       string
-		Private       bool
-		Authenticated bool
+		Target         *url.URL
+		Prefix         string
+		PrefixSlash    string
+		Rewrite        string
+		Private        bool
+		Authentication *string
 	}
 )
 
@@ -62,26 +61,21 @@ func parseRoutes(configDataSource io.Reader) ([]route, error) {
 			r := r
 
 			var (
-				prefix        = filepath.Clean(r.Prefix)
-				prefixSlash   = prefix
-				authenticated = s.Authenticated
+				prefix      = filepath.Clean(r.Prefix)
+				prefixSlash = prefix
 			)
 
 			if !strings.HasSuffix(prefixSlash, "/") {
 				prefixSlash += "/"
 			}
 
-			if r.Authenticated != nil {
-				authenticated = *r.Authenticated
-			}
-
 			routes = append(routes, route{
-				Prefix:        prefix,
-				PrefixSlash:   prefixSlash,
-				Target:        u,
-				Rewrite:       r.Rewrite,
-				Private:       r.Private,
-				Authenticated: authenticated,
+				Prefix:         prefix,
+				PrefixSlash:    prefixSlash,
+				Target:         u,
+				Rewrite:        r.Rewrite,
+				Private:        r.Private,
+				Authentication: s.Authentication,
 			})
 		}
 	}

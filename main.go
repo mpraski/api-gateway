@@ -4,53 +4,34 @@ import (
 	"context"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
-	"github.com/mpraski/api-gateway/authentication"
-	"github.com/mpraski/api-gateway/proxy"
-	"github.com/mpraski/api-gateway/service"
-	"github.com/mpraski/api-gateway/store"
+	"github.com/mpraski/api-gateway/app/authentication"
+	"github.com/mpraski/api-gateway/app/proxy"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-type (
-	timeouts struct {
-		ReadTimeout     time.Duration `default:"5s"`
-		WriteTimeout    time.Duration `default:"10s"`
-		IdleTimeout     time.Duration `default:"15s"`
-		ShutdownTimeout time.Duration `default:"30s"`
+type input struct {
+	Config string `required:"true"`
+	Server struct {
+		Address         string        `default:":8080"`
+		ReadTimeout     time.Duration `split_words:"true" default:"5s"`
+		WriteTimeout    time.Duration `split_words:"true" default:"10s"`
+		IdleTimeout     time.Duration `split_words:"true" default:"15s"`
+		ShutdownTimeout time.Duration `split_words:"true" default:"30s"`
 	}
-
-	input struct {
-		Config string `required:"true"`
-		Redis  struct {
-			Host string `default:"localhost"`
-			Port int    `default:"1234"`
-		}
-		Server struct {
-			timeouts
-			Address string `default:":8080"`
-		}
-		Internal struct {
-			timeouts
-			Address string `default:":8081"`
-		}
-		Observability struct {
-			timeouts
-			Address string `default:":9090"`
-		}
+	Observability struct {
+		Address string `default:":9090"`
 	}
-)
+}
 
 var (
 	// Health check
@@ -68,13 +49,7 @@ var (
 	})
 )
 
-const depsSize = 2
-
 func main() {
-	rootCtx := context.Background()
-
-	rand.Seed(time.Now().UnixNano())
-
 	logger := log.New(os.Stdout, "http: ", log.LstdFlags)
 	logger.Println("server is starting...")
 
@@ -83,47 +58,22 @@ func main() {
 		logger.Fatalf("failed to load input: %v\n", err)
 	}
 
-	var (
-		proxyConfig = strings.NewReader(i.Config)
-		memoryStore = store.NewMemoryStore()
-	)
+	proxyConfig := strings.NewReader(i.Config)
 
-	factory, err := authentication.NewFactory(rootCtx, proxyConfig, memoryStore, memoryStore)
+	schemes, err := authentication.MakeSchemes(proxyConfig)
 	if err != nil {
-		logger.Fatalf("failed to initialize authentication scheme factory: %v\n", err)
+		logger.Fatalf("failed to initialize authentication schemes: %v\n", err)
 	}
 
-	scheme, err := factory.New(authentication.Phantom)
-	if err != nil {
-		logger.Fatalf("failed to initialize phantom authentication scheme: %v\n", err)
-	}
-
-	reference := factory.NewReference()
-
 	var (
-		deps sync.WaitGroup
 		done = make(chan bool)
 		quit = make(chan os.Signal, 1)
 	)
-
-	deps.Add(depsSize)
-
-	internal := newInternalServer(&i, reference)
-
-	go func() {
-		logger.Println("starting internal server at", i.Internal.Address)
-		deps.Done()
-
-		if errs := internal.ListenAndServe(); errs != nil && errs != http.ErrServerClosed {
-			logger.Fatalf("failed to start internal server on %s: %v\n", i.Internal.Address, errs)
-		}
-	}()
 
 	observability := newObservabilityServer(&i)
 
 	go func() {
 		logger.Println("starting observability server at", i.Observability.Address)
-		deps.Done()
 
 		if errs := observability.ListenAndServe(); errs != nil && errs != http.ErrServerClosed {
 			logger.Fatalf("failed to start observability server on %s: %v\n", i.Observability.Address, errs)
@@ -132,7 +82,7 @@ func main() {
 
 	_, _ = proxyConfig.Seek(0, io.SeekStart)
 
-	p, err := proxy.New(proxyConfig, scheme)
+	p, err := proxy.New(proxyConfig, schemes)
 	if err != nil {
 		logger.Fatalf("failed to initialize proxy: %v\n", err)
 	}
@@ -160,15 +110,10 @@ func main() {
 		defer cancel()
 
 		main.SetKeepAlivesEnabled(false)
-		internal.SetKeepAlivesEnabled(false)
 		observability.SetKeepAlivesEnabled(false)
 
 		if err := main.Shutdown(ctx); err != nil {
 			logger.Fatalf("failed to gracefully shutdown the server: %v\n", err)
-		}
-
-		if err := internal.Shutdown(ctx); err != nil {
-			logger.Fatalf("failed to gracefully shutdown internal server: %v\n", err)
 		}
 
 		if err := observability.Shutdown(ctx); err != nil {
@@ -177,8 +122,6 @@ func main() {
 
 		close(done)
 	}()
-
-	deps.Wait()
 
 	logger.Println("server is ready to handle requests at", i.Server.Address)
 	atomic.StoreInt32(&healthy, 1)
@@ -201,22 +144,6 @@ func healthz() http.Handler {
 	})
 }
 
-func newInternalServer(cfg *input, reference *authentication.TokenReference) *http.Server {
-	router := http.NewServeMux()
-
-	router.Handle("/internal/tokens", http.HandlerFunc(
-		service.NewTokenReferenceServer(reference).HandleAssociation,
-	))
-
-	return &http.Server{
-		Addr:         cfg.Internal.Address,
-		ReadTimeout:  cfg.Internal.ReadTimeout,
-		WriteTimeout: cfg.Internal.WriteTimeout,
-		IdleTimeout:  cfg.Internal.IdleTimeout,
-		Handler:      router,
-	}
-}
-
 func newObservabilityServer(cfg *input) *http.Server {
 	router := http.NewServeMux()
 	router.Handle("/healthz", healthz())
@@ -224,9 +151,9 @@ func newObservabilityServer(cfg *input) *http.Server {
 
 	return &http.Server{
 		Addr:         cfg.Observability.Address,
-		ReadTimeout:  cfg.Observability.ReadTimeout,
-		WriteTimeout: cfg.Observability.WriteTimeout,
-		IdleTimeout:  cfg.Observability.IdleTimeout,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
 		Handler:      router,
 	}
 }

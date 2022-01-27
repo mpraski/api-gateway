@@ -34,7 +34,7 @@ spec:
       name: http-internal
     {{- end }}
     {{- if .probe.enabled }}
-    - port: {{ .internal.port | default 9090 }}
+    - port: {{ .internal.port | default 80 }}
       targetPort: {{ .probe.targetPort | default "http-probe" }}
       protocol: TCP
       name: http-probe
