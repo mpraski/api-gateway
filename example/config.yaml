@@ -30,4 +30,4 @@ services:
 
 authentication:
   oauth2-introspection:
-    baseUrl: some-host.local
+    baseUrl: http://some-host.local

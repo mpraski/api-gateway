@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	"github.com/mpraski/api-gateway/app/cache"
 )
 
@@ -41,20 +42,21 @@ type (
 
 const (
 	tokenLength   = 2
+	clientRetries = 3
 	numCounters   = 10000
 	maxCost       = 100000000
 	expiry        = time.Minute
-	clientTimeout = time.Second * 15
+	clientTimeout = 30 * time.Second
 )
 
 var (
-	ErrTokenMissing      = errors.New("failed to extract token from header")
-	ErrInvalidAudience   = errors.New("invalid audience value")
-	ErrInvalidScope      = errors.New("invalid scope value")
 	ErrNotAccessToken    = errors.New("token in use is not an access token")
+	ErrTokenMissing      = errors.New("failed to extract token from header")
 	ErrTokenInactive     = errors.New("token is inactive")
 	ErrTokenExpired      = errors.New("token is expired")
 	ErrInsufficientScope = errors.New("scope is insufficient")
+	ErrInvalidAudience   = errors.New("invalid audience value")
+	ErrInvalidScope      = errors.New("invalid scope value")
 )
 
 func (s *Scope) UnmarshalJSON(b []byte) error {
@@ -123,6 +125,10 @@ func (i *Introspection) Validate(args Args) error {
 }
 
 func NewOAuth2InstrospectionAuthenticator(baseURL string) (*OAuth2InstrospectionAuthenticator, error) {
+	retryClient := retryablehttp.NewClient()
+	retryClient.RetryMax = clientRetries
+	retryClient.RetryWaitMax = clientTimeout
+
 	tokens, err := cache.NewInMemory(numCounters, maxCost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize token cache: %w", err)
@@ -131,9 +137,7 @@ func NewOAuth2InstrospectionAuthenticator(baseURL string) (*OAuth2Instrospection
 	return &OAuth2InstrospectionAuthenticator{
 		baseURL: baseURL,
 		tokens:  tokens,
-		client: &http.Client{
-			Timeout: clientTimeout,
-		},
+		client:  retryClient.StandardClient(),
 	}, nil
 }
 
