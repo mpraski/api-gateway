@@ -3,7 +3,7 @@ services:
     target: http://n-gate.com
     authentication:
       oauth2-introspection:
-        requiredScopes: [read, write]
+        requiredScope: [read, write]
     routes:
       - prefix: /service-a
         rewrite: /
@@ -17,7 +17,7 @@ services:
     target: https://immunkarte.de/v2
     authentication:
       oauth2-introspection:
-        requiredScopes: [read, write]
+        requiredScope: [read, write]
     routes:
       - prefix: /service-b
         rewrite: /

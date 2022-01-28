@@ -105,9 +105,9 @@ func (i *Introspection) Validate(args Args) error {
 		i.Extra = map[string]interface{}{}
 	}
 
-	if requiredScopesVal, ok := args["requiredScopes"]; ok {
-		if requiredScopes, ok := requiredScopesVal.([]string); ok {
-			if !isContained(requiredScopes, i.Scope) {
+	if requiredScopeVal, ok := args["requiredScope"]; ok {
+		if requiredScope, ok := requiredScopeVal.([]string); ok {
+			if !isContained(requiredScope, i.Scope) {
 				return ErrInsufficientScope
 			}
 		}
