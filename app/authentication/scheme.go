@@ -22,6 +22,10 @@ const (
 )
 
 var (
+	SupportedSchemes = []string{
+		Unauthorized,
+		OAuth2Introspection,
+	}
 	sensitiveHeaders = []string{
 		"X-Subject",
 		"X-Issuer",
@@ -29,10 +33,6 @@ var (
 		"X-Scope",
 		"X-Audience",
 		"Authorization",
-	}
-	SupportedSchemes = []string{
-		Unauthorized,
-		OAuth2Introspection,
 	}
 )
 

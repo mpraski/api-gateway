@@ -175,11 +175,11 @@ func (a *OAuth2InstrospectionAuthenticator) Authenticate(r *http.Request, args A
 		}
 	}
 
+	ClearHeaders(r)
+
 	r.Header.Set("X-Subject", i.Subject)
 	r.Header.Set("X-Issuer", i.Issuer)
 	r.Header.Set("X-Client-ID", i.ClientID)
-	r.Header.Del("X-Scope")
-	r.Header.Del("X-Audience")
 
 	for _, s := range i.Scope {
 		r.Header.Add("X-Scope", s)
