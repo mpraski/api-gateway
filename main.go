@@ -52,6 +52,7 @@ var (
 func init() {
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.WarnLevel)
+	log.SetFormatter(&log.JSONFormatter{})
 }
 
 func main() {
