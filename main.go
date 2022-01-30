@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	log "github.com/sirupsen/logrus"
 )
 
 type input struct {
@@ -49,20 +49,22 @@ var (
 	})
 )
 
-func main() {
-	logger := log.New(os.Stdout, "http: ", log.LstdFlags)
-	logger.Println("server is starting...")
+func init() {
+	log.SetOutput(os.Stdout)
+	log.SetLevel(log.WarnLevel)
+}
 
+func main() {
 	var i input
 	if err := envconfig.Process(app, &i); err != nil {
-		logger.Fatalf("failed to load input: %v\n", err)
+		log.Fatalf("failed to load input: %v\n", err)
 	}
 
 	proxyConfig := strings.NewReader(i.Config)
 
 	schemes, err := authentication.MakeSchemes(proxyConfig)
 	if err != nil {
-		logger.Fatalf("failed to initialize authentication schemes: %v\n", err)
+		log.Fatalf("failed to initialize authentication schemes: %v\n", err)
 	}
 
 	var (
@@ -73,10 +75,10 @@ func main() {
 	observability := newObservabilityServer(&i)
 
 	go func() {
-		logger.Println("starting observability server at", i.Observability.Address)
+		log.Println("starting observability server at", i.Observability.Address)
 
 		if errs := observability.ListenAndServe(); errs != nil && errs != http.ErrServerClosed {
-			logger.Fatalf("failed to start observability server on %s: %v\n", i.Observability.Address, errs)
+			log.Fatalf("failed to start observability server on %s: %v\n", i.Observability.Address, errs)
 		}
 	}()
 
@@ -84,12 +86,12 @@ func main() {
 
 	p, err := proxy.New(proxyConfig, schemes)
 	if err != nil {
-		logger.Fatalf("failed to initialize proxy: %v\n", err)
+		log.Fatalf("failed to initialize proxy: %v\n", err)
 	}
 
 	h := p.Handler()
 	h = proxy.WithMetrics(requestsRoutedTotal, requestsRoutedDuration)(h)
-	h = proxy.WithLogging(logger)(h)
+	h = proxy.WithLogging()(h)
 
 	main := &http.Server{
 		Addr:         i.Server.Address,
@@ -103,7 +105,7 @@ func main() {
 
 	go func() {
 		<-quit
-		logger.Println("server is shutting down...")
+		log.Println("server is shutting down...")
 		atomic.StoreInt32(&healthy, 0)
 
 		ctx, cancel := context.WithTimeout(context.Background(), i.Server.ShutdownTimeout)
@@ -113,25 +115,25 @@ func main() {
 		observability.SetKeepAlivesEnabled(false)
 
 		if err := main.Shutdown(ctx); err != nil {
-			logger.Fatalf("failed to gracefully shutdown the server: %v\n", err)
+			log.Fatalf("failed to gracefully shutdown the server: %v\n", err)
 		}
 
 		if err := observability.Shutdown(ctx); err != nil {
-			logger.Fatalf("failed to gracefully shutdown observability server: %v\n", err)
+			log.Fatalf("failed to gracefully shutdown observability server: %v\n", err)
 		}
 
 		close(done)
 	}()
 
-	logger.Println("server is ready to handle requests at", i.Server.Address)
+	log.Println("server is ready to handle requests at", i.Server.Address)
 	atomic.StoreInt32(&healthy, 1)
 
 	if err := main.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Fatalf("failed to listen on %s: %v\n", i.Server.Address, err)
+		log.Fatalf("failed to listen on %s: %v\n", i.Server.Address, err)
 	}
 
 	<-done
-	logger.Println("server stopped")
+	log.Println("server stopped")
 }
 
 func healthz() http.Handler {

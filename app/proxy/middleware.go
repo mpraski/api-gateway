@@ -1,11 +1,11 @@
 package proxy
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
 )
 
 // LoggingWriter persists the response status code.
@@ -37,18 +37,30 @@ func WithMetrics(
 	}
 }
 
-func WithLogging(logger *log.Logger) func(http.Handler) http.Handler {
+func WithLogging() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w = newLoggingWriter(w)
 			defer func() {
-				logger.Println(
-					r.Method,
-					r.URL.Path,
-					w.(*loggingWriter).Code,
-					r.RemoteAddr,
-					r.UserAgent(),
+				var (
+					code  = w.(*loggingWriter).Code
+					entry = log.WithFields(log.Fields{
+						"method":     r.Method,
+						"path":       r.URL.Path,
+						"code":       code,
+						"address":    r.RemoteAddr,
+						"user_agent": r.UserAgent(),
+					})
 				)
+
+				switch c := code; {
+				case c >= http.StatusInternalServerError:
+					entry.Error("upstream failed")
+				case c >= http.StatusBadRequest:
+					entry.Warn("application failed")
+				default:
+					entry.Info("request proxied")
+				}
 			}()
 			next.ServeHTTP(w, r)
 		})

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hashicorp/go-retryablehttp"
 	"github.com/mpraski/api-gateway/app/cache"
 )
 
@@ -42,7 +41,6 @@ type (
 
 const (
 	tokenLength   = 2
-	clientRetries = 3
 	numCounters   = 10000
 	maxCost       = 100000000
 	expiry        = time.Minute
@@ -125,10 +123,6 @@ func (i *Introspection) Validate(args Args) error {
 }
 
 func NewOAuth2InstrospectionAuthenticator(baseURL string) (*OAuth2InstrospectionAuthenticator, error) {
-	retryClient := retryablehttp.NewClient()
-	retryClient.RetryMax = clientRetries
-	retryClient.RetryWaitMax = clientTimeout
-
 	tokens, err := cache.NewInMemory(numCounters, maxCost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize token cache: %w", err)
@@ -137,7 +131,7 @@ func NewOAuth2InstrospectionAuthenticator(baseURL string) (*OAuth2Instrospection
 	return &OAuth2InstrospectionAuthenticator{
 		baseURL: baseURL,
 		tokens:  tokens,
-		client:  retryClient.StandardClient(),
+		client:  &http.Client{Timeout: clientTimeout},
 	}, nil
 }
 
@@ -177,8 +171,8 @@ func (a *OAuth2InstrospectionAuthenticator) Authenticate(r *http.Request, args A
 
 	ClearHeaders(r)
 
-	r.Header.Set("X-Subject", i.Subject)
 	r.Header.Set("X-Issuer", i.Issuer)
+	r.Header.Set("X-Subject", i.Subject)
 	r.Header.Set("X-Client-ID", i.ClientID)
 
 	for _, s := range i.Scope {
