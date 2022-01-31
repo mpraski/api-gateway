@@ -48,13 +48,14 @@ const (
 )
 
 var (
-	ErrNotAccessToken    = errors.New("token in use is not an access token")
-	ErrTokenMissing      = errors.New("failed to extract token from header")
-	ErrTokenInactive     = errors.New("token is inactive")
-	ErrTokenExpired      = errors.New("token is expired")
-	ErrInsufficientScope = errors.New("scope is insufficient")
-	ErrInvalidAudience   = errors.New("invalid audience value")
-	ErrInvalidScope      = errors.New("invalid scope value")
+	ErrNotAccessToken       = errors.New("token in use is not an access token")
+	ErrTokenMissing         = errors.New("failed to extract token from header")
+	ErrTokenInactive        = errors.New("token is inactive")
+	ErrTokenExpired         = errors.New("token is expired")
+	ErrInsufficientScope    = errors.New("scope is insufficient")
+	ErrInsufficientAudience = errors.New("audience is insufficient")
+	ErrInvalidAudience      = errors.New("invalid audience value")
+	ErrInvalidScope         = errors.New("invalid scope value")
 )
 
 func (s *Scope) UnmarshalJSON(b []byte) error {
@@ -99,16 +100,24 @@ func (i *Introspection) Validate(args Args) error {
 		return ErrTokenExpired
 	}
 
-	if len(i.Extra) == 0 {
-		i.Extra = map[string]interface{}{}
-	}
-
 	if requiredScopeVal, ok := args["requiredScope"]; ok {
 		if requiredScope, ok := requiredScopeVal.([]string); ok {
 			if !isContained(requiredScope, i.Scope) {
 				return ErrInsufficientScope
 			}
 		}
+	}
+
+	if requiredAudienceVal, ok := args["requiredAudience"]; ok {
+		if requiredAudience, ok := requiredAudienceVal.([]string); ok {
+			if !isContained(requiredAudience, i.Audience) {
+				return ErrInsufficientAudience
+			}
+		}
+	}
+
+	if len(i.Extra) == 0 {
+		i.Extra = map[string]interface{}{}
 	}
 
 	i.Extra["username"] = i.Username

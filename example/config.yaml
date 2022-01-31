@@ -4,6 +4,7 @@ services:
     authentication:
       oauth2-introspection:
         requiredScope: [read, write]
+        requiredAudience: [example.com/billing]
     routes:
       - prefix: /service-a
         rewrite: /
