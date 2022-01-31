@@ -58,8 +58,6 @@ func WithLogging() func(http.Handler) http.Handler {
 					entry.Error("upstream failed")
 				case c >= http.StatusBadRequest:
 					entry.Warn("application failed")
-				default:
-					entry.Info("request proxied")
 				}
 			}()
 			next.ServeHTTP(w, r)
