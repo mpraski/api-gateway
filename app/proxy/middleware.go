@@ -53,10 +53,10 @@ func WithLogging() func(http.Handler) http.Handler {
 					})
 				)
 
-				switch c := code; {
-				case c >= http.StatusInternalServerError:
+				switch {
+				case code >= http.StatusInternalServerError:
 					entry.Error("upstream failed")
-				case c >= http.StatusBadRequest:
+				case code >= http.StatusBadRequest:
 					entry.Warn("application failed")
 				}
 			}()
