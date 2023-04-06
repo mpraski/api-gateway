@@ -2,161 +2,345 @@ package main
 
 import (
 	"context"
-	"io"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
+	"runtime"
+	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
+	"cloud.google.com/go/logging"
+	"github.com/go-redis/redis/v8"
+	"github.com/hellofresh/health-go/v4"
 	"github.com/kelseyhightower/envconfig"
-	"github.com/mpraski/api-gateway/app/authentication"
 	"github.com/mpraski/api-gateway/app/proxy"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	log "github.com/sirupsen/logrus"
+	"github.com/mpraski/api-gateway/app/ratelimit"
+	"github.com/mpraski/api-gateway/app/secret"
+	"github.com/mpraski/api-gateway/app/token"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-type input struct {
-	Config string `required:"true"`
+type config struct {
+	Debug  bool
+	Delay  time.Duration `default:"1s"`
+	Config string        `required:"true"`
 	Server struct {
-		Address         string        `default:":8080"`
-		ReadTimeout     time.Duration `split_words:"true" default:"5s"`
-		WriteTimeout    time.Duration `split_words:"true" default:"10s"`
-		IdleTimeout     time.Duration `split_words:"true" default:"15s"`
-		ShutdownTimeout time.Duration `split_words:"true" default:"30s"`
+		Address struct {
+			Public        string `default:":8080"`
+			Observability string `default:":9090"`
+		}
+		ReadTimeout       time.Duration `split_words:"true" default:"30s"`
+		WriteTimeout      time.Duration `split_words:"true" default:"30s"`
+		IdleTimeout       time.Duration `split_words:"true" default:"120s"`
+		ReadyTimeout      time.Duration `split_words:"true" default:"5s"`
+		ShutdownTimeout   time.Duration `split_words:"true" default:"10s"`
+		ReadHeaderTimeout time.Duration `split_words:"true" default:"5s"`
 	}
-	Observability struct {
-		Address string `default:":9090"`
+	Identity struct {
+		BaseURL string        `required:"true" split_words:"true"`
+		Timeout time.Duration `default:"15s"`
+	}
+	Redis struct {
+		Address  string
+		Database int `default:"0"`
+	}
+	Secrets struct {
+		RedisCertificate string `split_words:"true"`
+	}
+	Project struct {
+		ID string `required:"true"`
 	}
 }
 
 var (
 	// Health check
-	healthy int32
-	app     = "api_gateway"
-	// Metrics
-	requestsRoutedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "api_gateway_requests_routed_total",
-		Help: "The total number of routed requests",
-	}, []string{"method", "path", "code"})
-	requestsRoutedDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "api_gateway_requests_routed_duration_seconds",
-		Help:    "The histogram of routed request duration in seconds",
-		Buckets: prometheus.DefBuckets,
-	})
+	ready int32
+	app   = "api_gateway"
+	// Errors
+	errShutdown           = errors.New("shutdown in progress")
+	errTooManyGoroutines  = errors.New("too many goroutines")
+	errRedisMisconfigured = errors.New("redis is misconfigured")
+	errCertificateInvalid = errors.New("failed to decode PEM certificate")
 )
 
-func init() {
-	log.SetOutput(os.Stdout)
-	log.SetLevel(log.WarnLevel)
-	log.SetFormatter(&log.JSONFormatter{})
-}
-
 func main() {
-	var i input
-	if err := envconfig.Process(app, &i); err != nil {
-		log.Fatalf("failed to load input: %v", err)
+	ctx := context.Background()
+
+	var cfg config
+	if err := envconfig.Process(app, &cfg); err != nil {
+		log.Fatalf("failed to load config: %v", err)
 	}
 
-	proxyConfig := strings.NewReader(i.Config)
+	time.Sleep(cfg.Delay)
 
-	schemes, err := authentication.MakeSchemes(proxyConfig)
+	var opts []option.ClientOption
+	if cfg.Debug {
+		opts = append(opts,
+			option.WithoutAuthentication(),
+			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		)
+	}
+
+	c, err := logging.NewClient(ctx, cfg.Project.ID, opts...)
 	if err != nil {
-		log.Fatalf("failed to initialize authentication schemes: %v", err)
+		log.Fatalf("failed to setup logging client: %v", err)
 	}
 
-	var (
-		done = make(chan bool)
-		quit = make(chan os.Signal, 1)
-	)
-
-	observability := newObservabilityServer(&i)
-
-	go func() {
-		log.Println("starting observability server at", i.Observability.Address)
-
-		if errs := observability.ListenAndServe(); errs != nil && errs != http.ErrServerClosed {
-			log.Fatalf("failed to start observability server on %s: %v", i.Observability.Address, errs)
+	defer func() {
+		if err := c.Close(); err != nil {
+			log.Fatalf("failed to close logging client: %v", err)
 		}
 	}()
 
-	_, _ = proxyConfig.Seek(0, io.SeekStart)
+	l := c.Logger(app, logging.RedirectAsJSON(os.Stdout))
 
-	p, err := proxy.New(proxyConfig, schemes)
+	if err := run(ctx, &cfg, l); err != nil {
+		l.StandardLogger(logging.Critical).Fatalf("failed to run app: %v", err)
+	}
+}
+
+func run(ctx context.Context, cfg *config, lg *logging.Logger) error {
+	var (
+		appLog = lg.StandardLogger(logging.Info)
+		errLog = lg.StandardLogger(logging.Critical)
+		client = token.NewClient(cfg.Identity.BaseURL, &http.Client{Timeout: cfg.Identity.Timeout})
+	)
+
+	rateLimiter, closer, err := newRateLimiter(ctx, cfg)
 	if err != nil {
-		log.Fatalf("failed to initialize proxy: %v", err)
+		return fmt.Errorf("failed to initialize rate limiter: %w", err)
 	}
 
-	h := p.Handler()
-	h = proxy.WithMetrics(requestsRoutedTotal, requestsRoutedDuration)(h)
-	h = proxy.WithLogging()(h)
+	defer func() {
+		if err = closer(); err != nil {
+			errLog.Fatalf("failed to close rate limiter: %v", err)
+		}
+	}()
 
-	main := &http.Server{
-		Addr:         i.Server.Address,
-		ReadTimeout:  i.Server.ReadTimeout,
-		WriteTimeout: i.Server.WriteTimeout,
-		IdleTimeout:  i.Server.IdleTimeout,
-		Handler:      h,
+	if rateLimiter == nil {
+		appLog.Println("not using rate limiting")
+	} else {
+		appLog.Println("using rate limiting")
 	}
 
-	signal.Notify(quit, os.Interrupt)
+	p, err := proxy.New(cfg.Config, client, lg, rateLimiter)
+	if err != nil {
+		return fmt.Errorf("failed to initialize proxy: %w", err)
+	}
+
+	checks, err := newHealthChecks()
+	if err != nil {
+		return fmt.Errorf("failed to setup health checks: %w", err)
+	}
+
+	var (
+		warm sync.WaitGroup
+		done = make(chan struct{})
+		quit = make(chan os.Signal, 1)
+
+		publicServer = &http.Server{
+			Addr:              cfg.Server.Address.Public,
+			ReadTimeout:       cfg.Server.ReadTimeout,
+			WriteTimeout:      cfg.Server.WriteTimeout,
+			IdleTimeout:       cfg.Server.IdleTimeout,
+			ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
+			Handler:           p.Handler(),
+			BaseContext: func(net.Listener) context.Context {
+				return ctx
+			},
+		}
+		observabilityServer = newServer(ctx, cfg, cfg.Server.Address.Observability, func(m *http.ServeMux) {
+			m.Handle("/livez", checks[0])
+			m.Handle("/readyz", checks[1])
+		})
+		runServer = func(server *http.Server) {
+			warm.Done()
+			appLog.Println("starting server at", server.Addr)
+
+			if errs := server.ListenAndServe(); errs != nil && errs != http.ErrServerClosed {
+				errLog.Fatalf("failed to start server at %s: %v", server.Addr, errs)
+			}
+		}
+	)
+
+	warm.Add(2)
+
+	go runServer(publicServer)
+	go runServer(observabilityServer)
+
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-quit
-		log.Println("server is shutting down...")
-		atomic.StoreInt32(&healthy, 0)
 
-		ctx, cancel := context.WithTimeout(context.Background(), i.Server.ShutdownTimeout)
+		appLog.Println("app is shutting down...")
+		atomic.StoreInt32(&ready, 0)
+
+		publicServer.SetKeepAlivesEnabled(false)
+		observabilityServer.SetKeepAlivesEnabled(false)
+
+		time.Sleep(cfg.Server.ReadyTimeout)
+
+		c, cancel := context.WithTimeout(ctx, cfg.Server.ShutdownTimeout)
 		defer cancel()
 
-		main.SetKeepAlivesEnabled(false)
-		observability.SetKeepAlivesEnabled(false)
-
-		if err := main.Shutdown(ctx); err != nil {
-			log.Fatalf("failed to gracefully shutdown the server: %v", err)
+		if err := publicServer.Shutdown(c); err != nil {
+			errLog.Fatalf("failed to gracefully shutdown public server: %v", err)
 		}
 
-		if err := observability.Shutdown(ctx); err != nil {
-			log.Fatalf("failed to gracefully shutdown observability server: %v", err)
+		if err := observabilityServer.Shutdown(c); err != nil {
+			errLog.Fatalf("failed to gracefully shutdown observability server: %v", err)
 		}
 
 		close(done)
 	}()
 
-	log.Println("server is ready to handle requests at", i.Server.Address)
-	atomic.StoreInt32(&healthy, 1)
+	warm.Wait()
 
-	if err := main.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("failed to listen on %s: %v", i.Server.Address, err)
-	}
+	atomic.StoreInt32(&ready, 1)
+
+	appLog.Println("app started")
 
 	<-done
-	log.Println("server stopped")
+
+	appLog.Println("app stopped")
+
+	return nil
 }
 
-func healthz() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.LoadInt32(&healthy) == 1 {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		w.WriteHeader(http.StatusServiceUnavailable)
-	})
-}
+func newServer(ctx context.Context, cfg *config, address string, f func(*http.ServeMux)) *http.Server {
+	r := http.NewServeMux()
 
-func newObservabilityServer(cfg *input) *http.Server {
-	router := http.NewServeMux()
-	router.Handle("/healthz", healthz())
-	router.Handle("/metrics", promhttp.Handler())
+	f(r)
 
 	return &http.Server{
-		Addr:         cfg.Observability.Address,
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-		IdleTimeout:  cfg.Server.IdleTimeout,
-		Handler:      router,
+		Addr:              address,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
+		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
+		Handler:           r,
+		BaseContext: func(net.Listener) context.Context {
+			return ctx
+		},
 	}
+}
+
+const maxGoroutines = 1000
+
+func newHealthChecks() ([2]http.Handler, error) {
+	l, err := health.New(health.WithChecks(
+		health.Config{
+			Name:    "goroutine",
+			Timeout: time.Second * 5,
+			Check: func(_ context.Context) error {
+				if runtime.NumGoroutine() > maxGoroutines {
+					return errTooManyGoroutines
+				}
+
+				return nil
+			},
+		},
+	))
+
+	if err != nil {
+		return [2]http.Handler{}, fmt.Errorf("failed to set up health checks: %w", err)
+	}
+
+	r, err := health.New(health.WithChecks(
+		health.Config{
+			Name:    "shutdown",
+			Timeout: time.Second,
+			Check: func(_ context.Context) error {
+				if atomic.LoadInt32(&ready) == 0 {
+					return errShutdown
+				}
+
+				return nil
+			},
+		},
+	))
+
+	if err != nil {
+		return [2]http.Handler{}, fmt.Errorf("failed to set up health checks: %w", err)
+	}
+
+	return [2]http.Handler{l.Handler(), r.Handler()}, nil
+}
+
+var emptyCloseFunc = func() error { return nil }
+
+func newRateLimiter(ctx context.Context, cfg *config) (ratelimit.HandleFunc, func() error, error) {
+	if cfg.Debug {
+		return nil, emptyCloseFunc, nil
+	}
+
+	if cfg.Redis.Address == "" || cfg.Secrets.RedisCertificate == "" {
+		return nil, emptyCloseFunc, errRedisMisconfigured
+	}
+
+	gsm, gerr := secret.NewGoogleSecretManager(ctx, cfg.Project.ID)
+	if gerr != nil {
+		return nil, emptyCloseFunc, fmt.Errorf("failed to connect to GSM: %w", gerr)
+	}
+
+	defer gsm.Close()
+
+	redisCert, rerr := gsm.Get(ctx, cfg.Secrets.RedisCertificate)
+	if rerr != nil {
+		return nil, emptyCloseFunc, fmt.Errorf("failed to fetch redis certificate: %w", rerr)
+	}
+
+	b, _ := pem.Decode(redisCert)
+	if b == nil {
+		return nil, emptyCloseFunc, errCertificateInvalid
+	}
+
+	c, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		return nil, emptyCloseFunc, fmt.Errorf("failed to parse PEM certificate: %w", err)
+	}
+
+	roots := x509.NewCertPool()
+	roots.AddCert(c)
+
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: cfg.Redis.Address,
+		DB:   cfg.Redis.Database,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    roots,
+		},
+	})
+
+	if _, err := redisClient.Ping(ctx).Result(); err != nil {
+		return nil, emptyCloseFunc, fmt.Errorf("failed to ping redis: %w", err)
+	}
+
+	var (
+		rateLimiter = ratelimit.NewHandler(
+			ratelimit.NewSortedSetCounterStrategy(redisClient),
+			ratelimit.KeyFromHeader("X-Forwarded-For"),
+		)
+		closeFunc = func() error {
+			if err := redisClient.Close(); err != nil {
+				return fmt.Errorf("failed to close redis client: %w", err)
+			}
+
+			return nil
+		}
+	)
+
+	return rateLimiter, closeFunc, nil
 }
