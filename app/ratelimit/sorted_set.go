@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type SortedSetCounter struct {
+type SortedSetStrategy struct {
 	client *redis.Client
 }
 
@@ -19,13 +19,13 @@ const (
 	sortedSetMin = "-inf"
 )
 
-var _ Strategy = &SortedSetCounter{}
+var _ Strategy = (*SortedSetStrategy)(nil)
 
-func NewSortedSetCounterStrategy(client *redis.Client) *SortedSetCounter {
-	return &SortedSetCounter{client: client}
+func NewSortedSetStrategy(client *redis.Client) *SortedSetStrategy {
+	return &SortedSetStrategy{client: client}
 }
 
-func (s *SortedSetCounter) Run(ctx context.Context, r Request) (Result, error) {
+func (s *SortedSetStrategy) Run(ctx context.Context, r Request) (Result, error) {
 	var (
 		now       = time.Now().UTC()
 		expiresAt = now.Add(r.Duration)

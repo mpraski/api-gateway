@@ -330,7 +330,7 @@ func newRateLimiter(ctx context.Context, cfg *config) (ratelimit.HandleFunc, fun
 
 	var (
 		rateLimiter = ratelimit.NewHandler(
-			ratelimit.NewSortedSetCounterStrategy(redisClient),
+			ratelimit.NewSortedSetStrategy(redisClient),
 			ratelimit.KeyFromHeader("X-Forwarded-For"),
 		)
 		closeFunc = func() error {

@@ -1,34 +1,37 @@
-services:
-  example-service:
-    target: http://n-gate.com
-    authentication:
-      oauth2-introspection:
-        requiredScope: [read, write]
-        requiredAudience: [example.com/billing]
+routes:
+  - prefix: /web
+    authorization:
+      via: token
+      from: cookie
+      policy: enforced
+    cors:
+      enabled: true
+      allowedOrigins:
+        - https://my.domain
+        - https://www.my.domain
+      allowedMethods:
+        - get
+        - post
+        - put
+        - patch
+        - delete
+      allowedHeaders:
+        - Content-Type
+      exposedHeaders:
+        - Content-Disposition
+      allowCredentials: true
+    rateLimit:
+      enabled: true
+      limit: 1000
+      duration: 1m
     routes:
-      - prefix: /service-a
+      - prefix: /my-service
+        target: http://svc-my-service-app.namespace.svc.cluster.local
         rewrite: /
-      - prefix: /service-a/healthz
-        authentication:
-          unauthorized: {}
-      - prefix: /service-a/metrics
-        authentication:
-          unauthorized: {}
-  example-service-2:
-    target: https://immunkarte.de/v2
-    authentication:
-      oauth2-introspection:
-        requiredScope: [read, write]
-    routes:
-      - prefix: /service-b
-        rewrite: /
-      - prefix: /service-b/healthz
-        authentication:
-          unauthorized: {}
-      - prefix: /service-b/metrics
-        authentication:
-          unauthorized: {}
-
-authentication:
-  oauth2-introspection:
-    baseUrl: http://some-host.local
+        routes:
+          - prefix: /public-route
+            rewrite: /public-route
+            authorization:
+              policy: allowed
+            rateLimit:
+              enabled: false

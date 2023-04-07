@@ -4,7 +4,9 @@ A very simple HTTP reverse proxy with basic request routing and authentication s
 
 ## Purpose
 
-This little proxy is designed to sit between the public L7 HTTP/HTTPS load balancer and the services in the private network. It provides basic routing and request authentication via OAuth 2.0 token introspection. You'll only need to supply the URL of the token introspection endpoint provided by the OAuth 2.0 Server, for instance [ORY Hydra](https://github.com/ory/hydra).
+This little proxy is designed to sit between the public L7 HTTP/HTTPS load balancer and the services in the private network. It provides basic routing and request authentication via a custom bearer token strategy.
+
+This project is used with success in production at @blue-health, where it routes incoming traffic from GCP Cloud Load Balancer to respective Kube service withing GKE cluster.
 
 ## Builing
 
